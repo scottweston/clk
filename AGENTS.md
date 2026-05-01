@@ -1,0 +1,76 @@
+# AGENTS.md
+
+## Project Overview
+
+`clk` is a Go Bubble Tea terminal clock app. The executable lives at `cmd/clk`, with implementation split across internal packages:
+
+- `internal/app`: Bubble Tea model, key handling, settings overlay, layout, and clock composition.
+- `internal/config`: YAML config schema, defaults, normalization, migration, load/save.
+- `internal/render`: clock glyph renderers, seconds/progress renderers, figlet/toilet integration.
+- `internal/theme`: built-in palettes and Lip Gloss styles.
+
+The app uses Bubble Tea for the TUI runtime, Bubbles for help/progress UI, Lip Gloss for styling/layout, and `gopkg.in/yaml.v3` for config.
+
+## User-Facing Behavior
+
+- Default command: `go run ./cmd/clk`.
+- Config path defaults to `os.UserConfigDir()/clk/config.yaml`, usually `~/.config/clk/config.yaml` on Linux.
+- CLI flags:
+  - `--config PATH`: override config path.
+  - `--no-config`: run with defaults and skip config reads/writes.
+  - `--version`: print the app version.
+- Main keys:
+  - `s`: settings overlay.
+  - `?`: help overlay.
+  - `q` / `ctrl+c`: quit.
+  - Arrow keys or `h/j/k/l`: navigate/change settings.
+  - `enter` / space: change selected setting.
+  - `esc`: close overlay/back.
+
+## Config And Settings
+
+Current config fields include:
+
+- `time.format`: `24h`, `12h`, or `utc`.
+- `time.show_date`: show/hide date row.
+- `time.timezone`: `Local` by default; named zones are accepted if Go can load them.
+- `display.digit_style`: `block`, `braille`, `box`, `half_block`, `nerd_segment`, `figlet`, `toilet`.
+- `display.figlet_font`: selected font for `figlet` style.
+- `display.toilet_font`: selected font for `toilet` style.
+- `display.seconds_style`: `hidden`, `numeric`, `progress_bar`, `bubble_progress`, `ascii_circle`, `braille_circle`, `nerd_pulse`, `pomodoro`.
+- `display.inline_seconds`: independent on/off toggle for rendering seconds in the main clock line.
+- `display.size`: `normal` or `double`.
+- `display.blink_separator`: hides separators on odd seconds using a width-stable hidden separator glyph.
+- `display.alignment`: `left`, `center`, or `right`.
+- `theme.name` and `theme.accent`: built-in theme palette and accent color.
+- `ui.nerd_font`: enables Nerd Font-specific glyph choices where available.
+
+Normalization is intentionally conservative. Unknown enum values fall back to defaults. Old configs with `seconds_style: inline` are migrated to `inline_seconds: true` plus `seconds_style: hidden`.
+
+## Rendering Notes
+
+- Built-in clock glyphs are rendered per character so blinking separators can reserve exactly the same width as visible separators.
+- Braille rendering is generated from pixel bitmaps into real Unicode braille cells. Do not replace it with `⣿`-style block approximations.
+- Double-size braille scales the source bitmap before repacking into braille cells; naive rune duplication breaks the dot geometry.
+- `figlet` and `toilet` styles are optional external renderers. If the selected command/font is unavailable, rendering falls back to the built-in clock. `figlet` style also tries `toilet -f <figlet_font>` as a compatible fallback when the `figlet` binary is absent.
+- External glyphs are cached per command/font/rune to avoid spawning commands every frame for repeated characters.
+- Layout uses `joinVerticalWithBackground` instead of raw centered `lipgloss.JoinVertical` where theme-background padding matters. This avoids transparent/default terminal whitespace around shorter rows.
+- Bubble Progress seconds renderers use the active theme background for empty cells and percentage text; do not rely only on wrapping the progress output in a Lip Gloss background.
+
+## Testing
+
+Use the temp Go caches used during development:
+
+```sh
+GOCACHE=/tmp/senpai-go-build GOMODCACHE=/tmp/senpai-go-mod go test ./...
+```
+
+Tests cover config normalization/migration, renderer output, width stability for blinking separators, settings/model behavior, theme fallbacks, and optional external font behavior. Tests that require `toilet` skip when it is not available.
+
+## Development Guidance
+
+- Prefer extending existing enums and settings items over adding one-off paths.
+- Keep renderer behavior width-stable; avoid changes that make blinking separators or optional seconds display shift the main clock.
+- Preserve theme backgrounds on all padding, borders, progress bars, and overlay joins.
+- Keep external command support optional and failure-tolerant.
+- Run `gofmt -w internal cmd` and `go test ./...` before handing off changes.

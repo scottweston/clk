@@ -1,0 +1,30 @@
+# Go build outputs
+/clk
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Test and coverage artifacts
+coverage.out
+coverage.html
+*.prof
+
+# Local caches and temp files
+/.cache/
+/tmp/
+*.tmp
+
+# Local runtime config
+/config.yaml
+/.config/
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
