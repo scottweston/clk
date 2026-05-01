@@ -4,7 +4,7 @@
 
 `clk` is a Go Bubble Tea terminal clock app. The executable lives at `cmd/clk`, with implementation split across internal packages:
 
-- `internal/app`: Bubble Tea model, key handling, settings overlay, layout, and clock composition.
+- `internal/app`: Bubble Tea model, key handling, Bubbles list settings overlays, layout, and clock composition.
 - `internal/config`: YAML config schema, defaults, normalization, migration, load/save.
 - `internal/render`: clock glyph renderers, seconds/progress renderers, figlet/toilet integration.
 - `internal/theme`: built-in palettes and Lip Gloss styles.
@@ -58,7 +58,8 @@ Normalization is intentionally conservative. Unknown enum values fall back to de
 - `figlet` and `toilet` styles are optional external renderers. If the selected command/font is unavailable, rendering falls back to the built-in clock. `figlet` style also tries `toilet -f <figlet_font>` as a compatible fallback when the `figlet` binary is absent.
 - External glyphs are cached per command/font/rune to avoid spawning commands every frame for repeated characters.
 - Layout uses `joinVerticalWithBackground` instead of raw centered `lipgloss.JoinVertical` where theme-background padding matters. This avoids transparent/default terminal whitespace around shorter rows.
-- Bubble Progress seconds renderers use the active theme background for empty cells and percentage text; do not rely only on wrapping the progress output in a Lip Gloss background.
+- Third-party Bubbles output in overlays should be wrapped with `fillBackground` before and after panel rendering so internal padding and short lines inherit the active theme background. For Bubbles list menus, use the project-owned `settingsDelegate`; the default delegate emits internal ANSI resets that can leak terminal background.
+- Bubble Progress seconds renderers should use the native Bubbles `progress.Model` flow with theme gradient colors; avoid hand-building the bar unless Bubbles cannot support a required behavior.
 - Workday progress is 0% before the configured start time, fills to 100% between start and end, remains 100% after the end time, and resets to 0% on the next non-completed workday/off day.
 
 ## Testing
@@ -76,6 +77,6 @@ Tests cover config normalization/migration, renderer output, width stability for
 - Prefer extending existing enums and settings items over adding one-off paths.
 - Keep renderer behavior width-stable; avoid changes that make blinking separators or optional seconds display shift the main clock.
 - Preserve theme backgrounds on all padding, borders, progress bars, and overlay joins.
-- Keep settings submenus keyboard-driven and width-stable; the workday checkbox submenu uses Bubble Tea model state with `[x]` / `[ ]` rows.
+- Keep settings submenus keyboard-driven and width-stable; main settings and workday checkboxes render through Bubbles list with model-owned selection state.
 - Keep external command support optional and failure-tolerant.
 - Run `gofmt -w internal cmd` and `go test ./...` before handing off changes.

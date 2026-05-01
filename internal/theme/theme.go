@@ -70,7 +70,7 @@ func Styles(p Palette, accentName string) Stylesheet {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color(accent)).
 			BorderBackground(lipgloss.Color(p.Background)).
-			Padding(1, 2),
+			Padding(2, 3),
 		Selected: lipgloss.NewStyle().
 			Foreground(lipgloss.Color(p.Background)).
 			Background(lipgloss.Color(accent)).

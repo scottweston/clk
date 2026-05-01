@@ -7,6 +7,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -16,19 +17,24 @@ import (
 )
 
 type Model struct {
-	cfg       config.Config
-	manager   config.Manager
-	width     int
-	height    int
-	now       time.Time
-	settings  bool
-	helpOpen  bool
-	cursor    int
-	workdays  bool
-	dayCursor int
-	saveError string
-	help      help.Model
-	keys      keyMap
+	cfg             config.Config
+	manager         config.Manager
+	width           int
+	height          int
+	now             time.Time
+	settings        bool
+	helpOpen        bool
+	cursor          int
+	scrollOffset    int
+	dayScrollOffset int
+	workdays        bool
+	dayCursor       int
+	saveError       string
+	help            help.Model
+	progress        progress.Model
+	keys            keyMap
+	themeName       string
+	accentName      string
 }
 
 type tickMsg time.Time
@@ -36,11 +42,14 @@ type tickMsg time.Time
 func New(cfg config.Config, manager config.Manager) Model {
 	cfg.Normalize()
 	return Model{
-		cfg:     cfg,
-		manager: manager,
-		now:     time.Now(),
-		help:    help.New(),
-		keys:    keys,
+		cfg:        cfg,
+		manager:    manager,
+		now:        time.Now(),
+		help:       help.New(),
+		progress:   newProgressModel(cfg),
+		keys:       keys,
+		themeName:  cfg.Theme.Name,
+		accentName: cfg.Theme.Accent,
 	}
 }
 
@@ -112,20 +121,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.dayCursor > 0 {
 			m.dayCursor--
 		}
+		m.adjustDayScroll()
 	case m.settings && m.workdays && key.Matches(msg, m.keys.Down):
 		if m.dayCursor < len(config.WorkdayNames)-1 {
 			m.dayCursor++
 		}
+		m.adjustDayScroll()
 	case m.settings && m.workdays && key.Matches(msg, m.keys.Choose):
 		m.toggleWorkday(config.WorkdayNames[m.dayCursor])
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
 		}
+		m.adjustScroll(len(m.settingItems()))
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Down):
 		if m.cursor < len(m.settingItems())-1 {
 			m.cursor++
 		}
+		m.adjustScroll(len(m.settingItems()))
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Left):
 		m.changeSetting(-1)
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Right):
@@ -147,6 +160,7 @@ func (m *Model) changeSetting(delta int) {
 	}
 	items[m.cursor].change(delta, &m.cfg)
 	m.cfg.Normalize()
+	m.updateProgressColors()
 	if err := m.manager.Save(m.cfg); err != nil {
 		m.saveError = fmt.Sprintf("config save failed: %v", err)
 		return
@@ -169,6 +183,37 @@ func (m *Model) toggleWorkday(day string) {
 		return
 	}
 	m.saveError = ""
+}
+
+func newProgressModel(cfg config.Config) progress.Model {
+	palette := theme.Lookup(cfg.Theme.Name)
+	accent := theme.Accent(palette, cfg.Theme.Accent)
+	bar := progress.New(
+		progress.WithGradient(accent, palette.Warning),
+	)
+	bar.EmptyColor = palette.Background
+	bar.PercentageStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(palette.Foreground)).
+		Background(lipgloss.Color(palette.Background))
+	return bar
+}
+
+func (m *Model) updateProgressColors() {
+	if m.themeName == m.cfg.Theme.Name && m.accentName == m.cfg.Theme.Accent {
+		return
+	}
+	m.themeName = m.cfg.Theme.Name
+	m.accentName = m.cfg.Theme.Accent
+	palette := theme.Lookup(m.cfg.Theme.Name)
+	accent := theme.Accent(palette, m.cfg.Theme.Accent)
+	bar := progress.New(
+		progress.WithGradient(accent, palette.Warning),
+	)
+	bar.EmptyColor = palette.Background
+	bar.PercentageStyle = lipgloss.NewStyle().
+		Foreground(lipgloss.Color(palette.Foreground)).
+		Background(lipgloss.Color(palette.Background))
+	m.progress = bar
 }
 
 func (m Model) clockView(styles theme.Stylesheet, background string) string {
@@ -197,6 +242,9 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		NerdFont:   m.cfg.UI.NerdFont,
 		Background: background,
 		Accent:     theme.Accent(theme.Lookup(m.cfg.Theme.Name), m.cfg.Theme.Accent),
+		Foreground: theme.Lookup(m.cfg.Theme.Name).Foreground,
+		Muted:      theme.Lookup(m.cfg.Theme.Name).Muted,
+		Progress:   m.progressView,
 		Workday: render.WorkdayOptions{
 			StartTime: m.cfg.Workday.StartTime,
 			EndTime:   m.cfg.Workday.EndTime,
@@ -212,14 +260,21 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 
 func (m Model) progressWidth(clockArt string) int {
 	width := lipgloss.Width(clockArt)
-	viewportWidth := m.width - 8
-	if viewportWidth < 0 {
-		viewportWidth = 0
+	cap1 := int(float64(m.width) * 0.8)
+	cap2 := int(float64(width) * 1.5)
+	if cap1 < cap2 {
+		cap2 = cap1
 	}
-	if viewportWidth > width {
-		width = viewportWidth
+	if cap2 < width {
+		cap2 = width
 	}
-	return width
+	return cap2
+}
+
+func (m Model) progressView(percent float64, width int) string {
+	bar := m.progress
+	bar.Width = width
+	return bar.ViewAs(percent)
 }
 
 func (m Model) displayTime() time.Time {
@@ -232,6 +287,50 @@ func (m Model) displayTime() time.Time {
 		}
 	}
 	return m.now.Local()
+}
+
+func (m *Model) adjustScroll(total int) {
+	maxVisible := (m.height + 2) / 3
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+	if m.cursor < m.scrollOffset {
+		m.scrollOffset = m.cursor
+	}
+	if m.cursor >= m.scrollOffset+maxVisible {
+		m.scrollOffset = m.cursor - maxVisible + 1
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+	if m.scrollOffset+maxVisible > total {
+		m.scrollOffset = total - maxVisible
+	}
+	if m.scrollOffset < 0 {
+		m.scrollOffset = 0
+	}
+}
+
+func (m *Model) adjustDayScroll() {
+	maxVisible := (m.height + 2) / 3
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+	if m.dayCursor < m.dayScrollOffset {
+		m.dayScrollOffset = m.dayCursor
+	}
+	if m.dayCursor >= m.dayScrollOffset+maxVisible {
+		m.dayScrollOffset = m.dayCursor - maxVisible + 1
+	}
+	if m.dayScrollOffset < 0 {
+		m.dayScrollOffset = 0
+	}
+	if m.dayScrollOffset+maxVisible > len(config.WorkdayNames) {
+		m.dayScrollOffset = len(config.WorkdayNames) - maxVisible
+	}
+	if m.dayScrollOffset < 0 {
+		m.dayScrollOffset = 0
+	}
 }
 
 func (m Model) clockText(now time.Time) string {
@@ -272,9 +371,19 @@ func (m Model) settingsView(styles theme.Stylesheet) string {
 	}
 
 	items := m.settingItems()
+	maxVisible := (m.height + 2) / 3
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+	start := m.scrollOffset
+	end := start + maxVisible
+	if end > len(items) {
+		end = len(items)
+	}
+
 	rows := []string{styles.Muted.Render("Settings")}
-	for i, item := range items {
-		row := fmt.Sprintf("%-16s %s", item.label, item.value(m.cfg))
+	for i := start; i < end; i++ {
+		row := fmt.Sprintf("%-16s %s", items[i].label, items[i].value(m.cfg))
 		if i == m.cursor {
 			row = styles.Selected.Render(" " + row + " ")
 		} else {
@@ -282,24 +391,46 @@ func (m Model) settingsView(styles theme.Stylesheet) string {
 		}
 		rows = append(rows, row)
 	}
+	if len(items) > maxVisible {
+		remaining := len(items) - end
+		if remaining > 0 {
+			rows = append(rows, styles.Muted.Render(fmt.Sprintf("... %d more ▼", remaining)))
+		}
+	}
 	rows = append(rows, "", styles.Muted.Render("enter/right changes • esc closes • autosaves"))
 	return styles.Panel.Render(strings.Join(rows, "\n"))
 }
 
 func (m Model) workdaysView(styles theme.Stylesheet) string {
+	maxVisible := (m.height + 2) / 3
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+	start := m.dayScrollOffset
+	end := start + maxVisible
+	if end > len(config.WorkdayNames) {
+		end = len(config.WorkdayNames)
+	}
+
 	rows := []string{styles.Muted.Render("Work Days")}
-	for i, day := range config.WorkdayNames {
+	for i := start; i < end; i++ {
 		box := "[ ]"
-		if containsString(m.cfg.Workday.Days, day) {
+		if containsString(m.cfg.Workday.Days, config.WorkdayNames[i]) {
 			box = "[x]"
 		}
-		row := fmt.Sprintf("%s %-9s", box, workdayLabel(day))
+		row := fmt.Sprintf("%s %-9s", box, workdayLabel(config.WorkdayNames[i]))
 		if i == m.dayCursor {
 			row = styles.Selected.Render(" " + row + " ")
 		} else {
 			row = " " + row + " "
 		}
 		rows = append(rows, row)
+	}
+	if len(config.WorkdayNames) > maxVisible {
+		remaining := len(config.WorkdayNames) - end
+		if remaining > 0 {
+			rows = append(rows, styles.Muted.Render(fmt.Sprintf("... %d more ▼", remaining)))
+		}
 	}
 	rows = append(rows, "", styles.Muted.Render("enter/space toggles • esc returns • autosaves"))
 	return styles.Panel.Render(strings.Join(rows, "\n"))

@@ -5,9 +5,7 @@ import (
 	"math"
 	"strings"
 	"time"
-
-	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/lipgloss"
+	"unicode/utf8"
 )
 
 type SecondsOptions struct {
@@ -17,6 +15,9 @@ type SecondsOptions struct {
 	NerdFont   bool
 	Background string
 	Accent     string
+	Foreground string
+	Muted      string
+	Progress   func(float64, int) string
 	Workday    WorkdayOptions
 }
 
@@ -45,7 +46,7 @@ func SecondsStyled(opts SecondsOptions) string {
 	case "numeric":
 		return fmt.Sprintf("%02d", sec)
 	case "bubble_progress":
-		return bubbleProgress(progress, opts.Width, opts.Background, opts.Accent)
+		return progressView(opts.Progress, progress, opts.Width)
 	case "ascii_circle":
 		return asciiCircle(progress)
 	case "braille_circle":
@@ -54,25 +55,14 @@ func SecondsStyled(opts SecondsOptions) string {
 		if opts.NerdFont {
 			return nerdPulse(progress)
 		}
-		return progressBar(progress, opts.Width)
+		return progressView(opts.Progress, progress, opts.Width)
 	case "pomodoro":
-		return pomodoro(now, opts.Width, opts.Background, opts.Accent)
+		return pomodoro(now, opts.Width, opts.Progress)
 	case "workday":
-		return workday(now, opts.Width, opts.Background, opts.Accent, opts.Workday)
+		return workday(now, opts.Width, opts.Progress, opts.Workday)
 	default:
-		return progressBar(progress, opts.Width)
+		return progressView(opts.Progress, progress, opts.Width)
 	}
-}
-
-func bubbleProgress(value float64, width int, background, accent string) string {
-	p := progress.New(
-		progress.WithWidth(normalizeBarWidth(width)),
-		progress.WithSolidFill(defaultColor(accent, "#7dcfff")),
-		progress.WithFillCharacters('█', '█'),
-	)
-	p.EmptyColor = defaultColor(background, "#000000")
-	p.PercentageStyle = p.PercentageStyle.Background(lipgloss.Color(defaultColor(background, "#000000")))
-	return p.ViewAs(clamp(value))
 }
 
 func progressBar(progress float64, width int) string {
@@ -89,7 +79,25 @@ func normalizeBarWidth(width int) int {
 	return width
 }
 
-func pomodoro(now time.Time, width int, background, accent string) string {
+func pomodoro(now time.Time, width int, progress func(float64, int) string) string {
+	info := PomodoroProgress(now)
+	remaining := fmt.Sprintf("%02d:%02d", int(info.Remaining.Minutes()), int(info.Remaining.Seconds())%60)
+	label := info.Label + " " + remaining
+	barWidth := width - utf8.RuneCountInString(label) - 2
+	if barWidth < 1 {
+		barWidth = 1
+	}
+	bar := progressView(progress, info.Percent, normalizeBarWidth(barWidth))
+	return label + " " + bar
+}
+
+type ProgressInfo struct {
+	Percent   float64
+	Label     string
+	Remaining time.Duration
+}
+
+func PomodoroProgress(now time.Time) ProgressInfo {
 	const (
 		focus     = 25 * time.Minute
 		breakTime = 5 * time.Minute
@@ -114,12 +122,26 @@ func pomodoro(now time.Time, width int, background, accent string) string {
 	if remaining < 0 {
 		remaining = 0
 	}
-	barWidth := normalizeBarWidth(width - 16)
-	bar := bubbleProgress(float64(elapsed)/float64(period), barWidth, background, accent)
-	return fmt.Sprintf("%s %02d:%02d %s", label, int(remaining.Minutes()), int(remaining.Seconds())%60, bar)
+	return ProgressInfo{
+		Percent:   float64(elapsed) / float64(period),
+		Label:     label,
+		Remaining: remaining,
+	}
 }
 
-func workday(now time.Time, width int, background, accent string, opts WorkdayOptions) string {
+func workday(now time.Time, width int, progress func(float64, int) string, opts WorkdayOptions) string {
+	info := WorkdayProgress(now, opts)
+	remaining := fmt.Sprintf("%02d:%02d", int(info.Remaining.Hours()), int(info.Remaining.Minutes())%60)
+	label := fmt.Sprintf("%s %s", info.Label, remaining)
+	barWidth := width - utf8.RuneCountInString(label) - 2
+	if barWidth < 1 {
+		barWidth = 1
+	}
+	bar := progressView(progress, info.Percent, normalizeBarWidth(barWidth))
+	return label + " " + bar
+}
+
+func WorkdayProgress(now time.Time, opts WorkdayOptions) ProgressInfo {
 	start, ok := parseClockMinutes(opts.StartTime)
 	if !ok {
 		start = 9 * 60
@@ -134,30 +156,96 @@ func workday(now time.Time, width int, background, accent string, opts WorkdayOp
 
 	nowMinute := now.Hour()*60 + now.Minute()
 	workingDay := isConfiguredWorkday(now.Weekday(), opts.Days)
-	progress := 0.0
-	remaining := time.Duration(end-nowMinute)*time.Minute - time.Duration(now.Second())*time.Second - time.Duration(now.Nanosecond())
 	label := "workday"
 
-	switch {
-	case !workingDay:
-		progress = 0
-		remaining = 0
-		label = "off"
-	case nowMinute < start:
-		progress = 0
-		remaining = time.Duration(end-start) * time.Minute
-	case nowMinute >= end:
-		progress = 1
-		remaining = 0
-	default:
+	if workingDay && nowMinute >= start && nowMinute < end {
 		elapsed := time.Duration(nowMinute-start)*time.Minute + time.Duration(now.Second())*time.Second + time.Duration(now.Nanosecond())
 		total := time.Duration(end-start) * time.Minute
-		progress = float64(elapsed) / float64(total)
+		remaining := total - elapsed
+		if remaining < 0 {
+			remaining = 0
+		}
+		return ProgressInfo{
+			Percent:   float64(elapsed) / float64(total),
+			Label:     label,
+			Remaining: remaining,
+		}
 	}
 
-	barWidth := normalizeBarWidth(width - 20)
-	bar := bubbleProgress(progress, barWidth, background, accent)
-	return fmt.Sprintf("%s %02d:%02d %s", label, int(remaining.Hours()), int(remaining.Minutes())%60, bar)
+	if !workingDay {
+		label = "off"
+	}
+
+	nextStart := nextWorkBoundary(now, start, opts.Days, true)
+	previousEnd := previousWorkBoundary(nextStart, end, opts.Days)
+	total := nextStart.Sub(previousEnd)
+	remaining := nextStart.Sub(now)
+	if remaining < 0 {
+		remaining = 0
+	}
+	progress := 0.0
+	if total > 0 {
+		progress = float64(remaining) / float64(total)
+	}
+
+	return ProgressInfo{
+		Percent:   progress,
+		Label:     label,
+		Remaining: remaining,
+	}
+}
+
+func nextWorkBoundary(now time.Time, minutes int, days []string, includeToday bool) time.Time {
+	for offset := 0; offset <= 7; offset++ {
+		day := now.AddDate(0, 0, offset)
+		if !isConfiguredWorkday(day.Weekday(), days) {
+			continue
+		}
+		boundary := timeOnDay(day, minutes)
+		if (offset == 0 && !includeToday) || !boundary.After(now) {
+			continue
+		}
+		return boundary
+	}
+	return timeOnDay(now.AddDate(0, 0, 1), minutes)
+}
+
+func previousWorkBoundary(now time.Time, minutes int, days []string) time.Time {
+	for offset := 0; offset <= 7; offset++ {
+		day := now.AddDate(0, 0, -offset)
+		if !isConfiguredWorkday(day.Weekday(), days) {
+			continue
+		}
+		boundary := timeOnDay(day, minutes)
+		if boundary.Before(now) {
+			return boundary
+		}
+	}
+	return timeOnDay(now.AddDate(0, 0, -1), minutes)
+}
+
+func timeOnDay(day time.Time, minutes int) time.Time {
+	return time.Date(day.Year(), day.Month(), day.Day(), minutes/60, minutes%60, 0, 0, day.Location())
+}
+
+func ProgressPercent(now time.Time, style string, workday WorkdayOptions) (float64, bool) {
+	switch style {
+	case "progress_bar", "bubble_progress":
+		return float64(now.Second()*1_000_000_000+now.Nanosecond()) / float64(60*time.Second), true
+	case "pomodoro":
+		return PomodoroProgress(now).Percent, true
+	case "workday":
+		return WorkdayProgress(now, workday).Percent, true
+	default:
+		return 0, false
+	}
+}
+
+func progressView(view func(float64, int) string, percent float64, width int) string {
+	if view != nil {
+		return view(percent, width)
+	}
+	return progressBar(percent, width)
 }
 
 func parseClockMinutes(value string) (int, bool) {

@@ -170,11 +170,19 @@ func TestProgressBarCanExceedSixtyColumns(t *testing.T) {
 	}
 }
 
-func TestBubbleProgressUsesBubblesProgressBar(t *testing.T) {
+func TestBubbleProgressFallbackUsesBar(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 30, 0, time.Local)
-	got := Seconds(now, "bubble_progress", 24, false)
-	if !strings.Contains(got, "50%") {
-		t.Fatalf("expected bubble progress percentage, got %q", got)
+	got := SecondsStyled(SecondsOptions{
+		Time:       now,
+		Style:      "bubble_progress",
+		Width:      24,
+		Background: "#1a1b26",
+		Accent:     "#7dcfff",
+		Foreground: "#c0caf5",
+		Muted:      "#565f89",
+	})
+	if !strings.Contains(got, "============") {
+		t.Fatalf("expected bubble progress bar, got %q", got)
 	}
 }
 
@@ -202,23 +210,23 @@ func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
 	}
 
 	opts.Time = time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 08:00") || !strings.Contains(got, "  0%") {
-		t.Fatalf("expected pre-workday 0%% with full remaining time, got %q", got)
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 00:30") || !strings.Contains(got, "[") {
+		t.Fatalf("expected pre-workday with bar, got %q", got)
 	}
 
 	opts.Time = time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 04:00") || !strings.Contains(got, " 50%") {
-		t.Fatalf("expected mid-workday 50%%, got %q", got)
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 04:00") || !strings.Contains(got, "[") {
+		t.Fatalf("expected mid-workday with bar, got %q", got)
 	}
 
 	opts.Time = time.Date(2026, 5, 1, 18, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 00:00") || !strings.Contains(got, "100%") {
-		t.Fatalf("expected after-workday 100%%, got %q", got)
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 63:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
+		t.Fatalf("expected after-workday bar to drain toward next start, got %q", got)
 	}
 
 	opts.Time = time.Date(2026, 5, 2, 13, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "off 00:00") || !strings.Contains(got, "  0%") {
-		t.Fatalf("expected off day reset, got %q", got)
+	if got := SecondsStyled(opts); !strings.Contains(got, "off 44:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
+		t.Fatalf("expected off day bar to drain toward next start, got %q", got)
 	}
 }
 

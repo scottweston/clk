@@ -23,8 +23,8 @@ func TestModelRendersClock(t *testing.T) {
 	if !strings.Contains(out, "Friday") {
 		t.Fatalf("expected date in output, got %q", out)
 	}
-	if !strings.Contains(out, "[") {
-		t.Fatalf("expected seconds progress in output, got %q", out)
+	if !strings.Contains(out, "25%") {
+		t.Fatalf("expected seconds progress to use current time, got %q", out)
 	}
 }
 
@@ -62,6 +62,7 @@ func TestWorkdaySettingsChangeNoConfig(t *testing.T) {
 func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
 	m.settings = true
+	m.height = 30
 	items := m.settingItems()
 	for i, item := range items {
 		if item.label == "Work days" {
@@ -182,8 +183,33 @@ func TestInlineSecondsCanCombineWithProgressDisplay(t *testing.T) {
 	m.now = time.Date(2026, 5, 1, 13, 14, 15, 0, time.Local)
 
 	out := m.View()
-	if !strings.Contains(out, "[") {
-		t.Fatalf("expected separate seconds progress display, got %q", out)
+	if !strings.Contains(out, "25%") {
+		t.Fatalf("expected separate seconds progress display to use current time, got %q", out)
+	}
+}
+
+func TestBubbleProgressStylesUseCurrentTime(t *testing.T) {
+	cases := []struct {
+		style string
+		now   time.Time
+		want  string
+	}{
+		{"bubble_progress", time.Date(2026, 5, 1, 13, 14, 15, 0, time.Local), "25%"},
+		{"pomodoro", time.Date(2026, 5, 1, 12, 10, 0, 0, time.Local), "40%"},
+		{"workday", time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local), "50%"},
+	}
+
+	for _, tc := range cases {
+		cfg := config.Default()
+		cfg.Display.SecondsStyle = tc.style
+		m := New(cfg, config.NewManager("", true))
+		m.width = 100
+		m.height = 30
+		m.now = tc.now
+
+		if out := m.View(); !strings.Contains(out, tc.want) {
+			t.Fatalf("expected %s to render %s from current time, got %q", tc.style, tc.want, out)
+		}
 	}
 }
 
