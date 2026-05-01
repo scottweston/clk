@@ -223,7 +223,6 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		Value:      value,
 		Style:      m.cfg.Display.DigitStyle,
 		NerdFont:   m.cfg.UI.NerdFont,
-		Scale:      m.clockScale(),
 		FigletFont: m.cfg.Display.FigletFont,
 		ToiletFont: m.cfg.Display.ToiletFont,
 	})
@@ -358,13 +357,6 @@ func (m Model) clockText(now time.Time) string {
 	return now.Format(timeFormat)
 }
 
-func (m Model) clockScale() int {
-	if m.cfg.Display.Size == "double" {
-		return 2
-	}
-	return 1
-}
-
 func (m Model) settingsView(styles theme.Stylesheet) string {
 	if m.workdays {
 		return m.workdaysView(styles)
@@ -444,15 +436,20 @@ type settingItem struct {
 }
 
 func (m Model) settingItems() []settingItem {
-	return []settingItem{
+	items := []settingItem{
 		cycleItem("Theme", func(c config.Config) string { return c.Theme.Name }, func(v string, c *config.Config) { c.Theme.Name = v }, theme.Names()),
 		cycleItem("Accent", func(c config.Config) string { return c.Theme.Accent }, func(v string, c *config.Config) { c.Theme.Accent = v }, config.Accents),
 		cycleItem("Time format", func(c config.Config) string { return c.Time.Format }, func(v string, c *config.Config) { c.Time.Format = v }, config.TimeFormats),
 		toggleItem("Show date", func(c config.Config) bool { return c.Time.ShowDate }, func(v bool, c *config.Config) { c.Time.ShowDate = v }),
 		cycleItem("Digit style", func(c config.Config) string { return c.Display.DigitStyle }, func(v string, c *config.Config) { c.Display.DigitStyle = v }, config.DigitStyles),
-		cycleItem("Figlet font", func(c config.Config) string { return c.Display.FigletFont }, func(v string, c *config.Config) { c.Display.FigletFont = v }, config.FigletFonts),
-		cycleItem("Toilet font", func(c config.Config) string { return c.Display.ToiletFont }, func(v string, c *config.Config) { c.Display.ToiletFont = v }, config.ToiletFonts),
-		cycleItem("Clock size", func(c config.Config) string { return c.Display.Size }, func(v string, c *config.Config) { c.Display.Size = v }, config.Sizes),
+	}
+	if m.cfg.Display.DigitStyle == "figlet" {
+		items = append(items, cycleItem("Figlet font", func(c config.Config) string { return c.Display.FigletFont }, func(v string, c *config.Config) { c.Display.FigletFont = v }, config.FigletFonts))
+	}
+	if m.cfg.Display.DigitStyle == "toilet" {
+		items = append(items, cycleItem("Toilet font", func(c config.Config) string { return c.Display.ToiletFont }, func(v string, c *config.Config) { c.Display.ToiletFont = v }, config.ToiletFonts))
+	}
+	items = append(items,
 		toggleItem("Blink sep", func(c config.Config) bool { return c.Display.BlinkSeparator }, func(v bool, c *config.Config) { c.Display.BlinkSeparator = v }),
 		toggleItem("Inline sec", func(c config.Config) bool { return c.Display.InlineSeconds }, func(v bool, c *config.Config) { c.Display.InlineSeconds = v }),
 		cycleItem("Seconds", func(c config.Config) string { return c.Display.SecondsStyle }, func(v string, c *config.Config) { c.Display.SecondsStyle = v }, config.SecondsStyles),
@@ -461,7 +458,8 @@ func (m Model) settingItems() []settingItem {
 		submenuItem("Work days", func(c config.Config) string { return strings.Join(c.Workday.Days, ",") }, "workdays"),
 		cycleItem("Alignment", func(c config.Config) string { return c.Display.Alignment }, func(v string, c *config.Config) { c.Display.Alignment = v }, config.Alignments),
 		toggleItem("Nerd Font", func(c config.Config) bool { return c.UI.NerdFont }, func(v bool, c *config.Config) { c.UI.NerdFont = v }),
-	}
+	)
+	return items
 }
 
 func submenuItem(label string, value func(config.Config) string, submenu string) settingItem {

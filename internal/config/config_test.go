@@ -58,11 +58,35 @@ func TestNormalizeInvalidValues(t *testing.T) {
 		Theme:   ThemeConfig{Accent: "bad"},
 	}
 	cfg.Normalize()
-	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.Size != "normal" {
+	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.Size != "" {
 		t.Fatalf("invalid values were not normalized: %+v", cfg)
 	}
 	if cfg.Workday.StartTime != "09:00" || cfg.Workday.EndTime != "17:00" || strings.Join(cfg.Workday.Days, ",") != "mon,tue,wed,thu,fri" {
 		t.Fatalf("invalid workday values were not normalized: %+v", cfg.Workday)
+	}
+}
+
+func TestNormalizeMigratesDoubleSizeToDigitStyle(t *testing.T) {
+	cases := map[string]string{
+		"block":      "block_2x",
+		"braille":    "braille_2x",
+		"box":        "box_2x",
+		"half_block": "half_block_2x",
+		"figlet":     "figlet",
+		"toilet":     "toilet",
+	}
+	for style, want := range cases {
+		cfg := Default()
+		cfg.Display.DigitStyle = style
+		cfg.Display.Size = "double"
+		cfg.Normalize()
+
+		if cfg.Display.DigitStyle != want {
+			t.Fatalf("style %q migrated to %q, want %q", style, cfg.Display.DigitStyle, want)
+		}
+		if cfg.Display.Size != "" {
+			t.Fatalf("expected legacy size to be cleared, got %q", cfg.Display.Size)
+		}
 	}
 }
 

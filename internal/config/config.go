@@ -37,7 +37,7 @@ type DisplayConfig struct {
 	SecondsStyle   string `yaml:"seconds_style"`
 	InlineSeconds  bool   `yaml:"inline_seconds"`
 	Alignment      string `yaml:"alignment"`
-	Size           string `yaml:"size"`
+	Size           string `yaml:"size,omitempty"`
 	BlinkSeparator bool   `yaml:"blink_separator"`
 }
 
@@ -80,7 +80,6 @@ func Default() Config {
 			SecondsStyle:   "progress_bar",
 			InlineSeconds:  false,
 			Alignment:      "center",
-			Size:           "normal",
 			BlinkSeparator: false,
 		},
 		Workday: WorkdayConfig{
@@ -173,6 +172,10 @@ func (c *Config) Normalize() {
 	if !contains(DigitStyles, c.Display.DigitStyle) {
 		c.Display.DigitStyle = "block"
 	}
+	if c.Display.Size == "double" {
+		c.Display.DigitStyle = doubleDigitStyle(c.Display.DigitStyle)
+	}
+	c.Display.Size = ""
 	if !contains(FigletFonts, c.Display.FigletFont) {
 		c.Display.FigletFont = "standard"
 	}
@@ -188,9 +191,6 @@ func (c *Config) Normalize() {
 	}
 	if !contains(Alignments, c.Display.Alignment) {
 		c.Display.Alignment = "center"
-	}
-	if !contains(Sizes, c.Display.Size) {
-		c.Display.Size = "normal"
 	}
 	if !contains(TimeChoices, c.Workday.StartTime) {
 		c.Workday.StartTime = "09:00"
@@ -211,9 +211,14 @@ var TimeFormats = []string{"24h", "12h", "utc"}
 
 var DigitStyles = []string{
 	"block",
+	"block_2x",
 	"braille",
+	"braille_2x",
+	"braille_4x",
 	"box",
+	"box_2x",
 	"half_block",
+	"half_block_2x",
 	"nerd_segment",
 	"figlet",
 	"toilet",
@@ -237,8 +242,6 @@ var SecondsStyles = []string{
 
 var Alignments = []string{"left", "center", "right"}
 
-var Sizes = []string{"normal", "double"}
-
 var TimeChoices = []string{
 	"00:00", "00:30", "01:00", "01:30", "02:00", "02:30",
 	"03:00", "03:30", "04:00", "04:30", "05:00", "05:30",
@@ -261,6 +264,21 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func doubleDigitStyle(style string) string {
+	switch style {
+	case "block", "block_2x":
+		return "block_2x"
+	case "braille", "braille_2x", "braille_4x":
+		return "braille_2x"
+	case "box", "box_2x":
+		return "box_2x"
+	case "half_block", "half_block_2x":
+		return "half_block_2x"
+	default:
+		return style
+	}
 }
 
 func normalizeWorkdays(days []string) []string {

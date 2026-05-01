@@ -12,9 +12,14 @@ type DigitStyle string
 
 const (
 	StyleBlock       DigitStyle = "block"
+	StyleBlock2x     DigitStyle = "block_2x"
 	StyleBraille     DigitStyle = "braille"
+	StyleBraille2x   DigitStyle = "braille_2x"
+	StyleBraille4x   DigitStyle = "braille_4x"
 	StyleBox         DigitStyle = "box"
+	StyleBox2x       DigitStyle = "box_2x"
 	StyleHalfBlock   DigitStyle = "half_block"
+	StyleHalfBlock2x DigitStyle = "half_block_2x"
 	StyleNerdSegment DigitStyle = "nerd_segment"
 	StyleFiglet      DigitStyle = "figlet"
 	StyleToilet      DigitStyle = "toilet"
@@ -52,14 +57,14 @@ func ClockStyled(opts ClockOptions) string {
 	style := DigitStyle(opts.Style)
 	switch style {
 	case StyleFiglet:
-		if out, ok := externalClock(opts.Value, "figlet", defaultFont(opts.FigletFont, "standard"), opts.Scale); ok {
+		if out, ok := externalClock(opts.Value, "figlet", defaultFont(opts.FigletFont, "standard"), 1); ok {
 			return out
 		}
-		if out, ok := externalClock(opts.Value, "toilet", defaultFont(opts.FigletFont, "standard"), opts.Scale); ok {
+		if out, ok := externalClock(opts.Value, "toilet", defaultFont(opts.FigletFont, "standard"), 1); ok {
 			return out
 		}
 	case StyleToilet:
-		if out, ok := externalClock(opts.Value, "toilet", defaultFont(opts.ToiletFont, "standard"), opts.Scale); ok {
+		if out, ok := externalClock(opts.Value, "toilet", defaultFont(opts.ToiletFont, "standard"), 1); ok {
 			return out
 		}
 	}
@@ -70,26 +75,52 @@ func ClockStyled(opts ClockOptions) string {
 func builtInClock(value string, styleName string, nerdFont bool, factor int) string {
 	style := DigitStyle(styleName)
 	var glyphs map[rune][]string
+	scale := 1
 	switch style {
+	case StyleBlock:
+		glyphs = blockGlyphs
+		scale = factor
+	case StyleBlock2x:
+		glyphs = blockGlyphs
+		scale = 2
 	case StyleBraille:
 		glyphs = makeBrailleGlyphs(factor)
+	case StyleBraille2x:
+		glyphs = makeBrailleGlyphs(2)
+	case StyleBraille4x:
+		glyphs = makeBrailleGlyphs(4)
 	case StyleBox:
-		glyphs = boxGlyphs
+		if factor > 1 {
+			glyphs = boxGlyphs2x
+		} else {
+			glyphs = boxGlyphs
+		}
+	case StyleBox2x:
+		glyphs = boxGlyphs2x
 	case StyleHalfBlock:
-		glyphs = halfBlockGlyphs
+		if factor > 1 {
+			glyphs = halfBlockGlyphs2x
+		} else {
+			glyphs = halfBlockGlyphs
+		}
+	case StyleHalfBlock2x:
+		glyphs = halfBlockGlyphs2x
 	case StyleNerdSegment:
 		if nerdFont {
 			glyphs = nerdGlyphs
+		} else if factor > 1 {
+			glyphs = boxGlyphs2x
 		} else {
 			glyphs = boxGlyphs
 		}
 	default:
 		glyphs = blockGlyphs
+		scale = factor
 	}
 
 	out := renderGlyphs(value, glyphs)
-	if style != StyleBraille && factor > 1 {
-		return Scale(out, factor)
+	if scale > 1 {
+		return Scale(out, scale)
 	}
 	return out
 }
@@ -160,6 +191,8 @@ type externalGlyphKey struct {
 var externalGlyphCache sync.Map
 
 func externalClock(value, tool, font string, factor int) (string, bool) {
+	_ = factor
+
 	if _, err := exec.LookPath(tool); err != nil {
 		return "", false
 	}
@@ -176,11 +209,7 @@ func externalClock(value, tool, font string, factor int) (string, bool) {
 		glyphs[r] = glyph
 	}
 
-	out := renderGlyphs(value, normalizeGlyphs(glyphs))
-	if factor > 1 {
-		out = Scale(out, factor)
-	}
-	return out, true
+	return renderGlyphs(value, normalizeGlyphs(glyphs)), true
 }
 
 func externalGlyph(tool, font string, r rune) ([]string, bool) {
@@ -435,6 +464,201 @@ var boxGlyphs = map[rune][]string{
 	'M':             {"│  │", "├┐┌┤", "│└┘│", "│  │", "│  │"},
 }
 
+var boxGlyphs2x = map[rune][]string{
+	'0': {
+		"┌──────┐",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"└──────┘",
+	},
+	'1': {
+		"   ┌┐   ",
+		"  ┌┘│   ",
+		" ┌┘ │   ",
+		"    │   ",
+		"    │   ",
+		"    │   ",
+		"    │   ",
+		"    │   ",
+		"    │   ",
+		" ───┴── ",
+	},
+	'2': {
+		"┌──────┐",
+		"       │",
+		"       │",
+		"       │",
+		"       │",
+		"┌──────┘",
+		"│       ",
+		"│       ",
+		"│       ",
+		"└───────",
+	},
+	'3': {
+		"┌──────┐",
+		"       │",
+		"       │",
+		"       │",
+		"       │",
+		" ──────┤",
+		"       │",
+		"       │",
+		"       │",
+		"└──────┘",
+	},
+	'4': {
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"└──────┤",
+		"       │",
+		"       │",
+		"       │",
+		"       │",
+	},
+	'5': {
+		"┌───────",
+		"│       ",
+		"│       ",
+		"│       ",
+		"│       ",
+		"└──────┐",
+		"       │",
+		"       │",
+		"       │",
+		"└──────┘",
+	},
+	'6': {
+		"┌───────",
+		"│       ",
+		"│       ",
+		"│       ",
+		"│       ",
+		"├──────┐",
+		"│      │",
+		"│      │",
+		"│      │",
+		"└──────┘",
+	},
+	'7': {
+		"┌──────┐",
+		"       │",
+		"       │",
+		"      ┌┘",
+		"     ┌┘ ",
+		"    ┌┘  ",
+		"    │   ",
+		"    │   ",
+		"    │   ",
+		"    │   ",
+	},
+	'8': {
+		"┌──────┐",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"├──────┤",
+		"│      │",
+		"│      │",
+		"│      │",
+		"└──────┘",
+	},
+	'9': {
+		"┌──────┐",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"└──────┤",
+		"       │",
+		"       │",
+		"       │",
+		"└──────┘",
+	},
+	':': {
+		"        ",
+		"        ",
+		"  ████  ",
+		"  ████  ",
+		"        ",
+		"        ",
+		"  ████  ",
+		"  ████  ",
+		"        ",
+		"        ",
+	},
+	HiddenSeparator: {
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+	},
+	' ': {
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+		"        ",
+	},
+	'A': {
+		"┌──────┐",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"├──────┤",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+	},
+	'P': {
+		"┌──────┐",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"├──────┘",
+		"│       ",
+		"│       ",
+		"│       ",
+		"│       ",
+	},
+	'M': {
+		"│      │",
+		"├┐    ┌┤",
+		"│└┐  ┌┘│",
+		"│ └┐┌┘ │",
+		"│  └┘  │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+		"│      │",
+	},
+}
+
 var halfBlockGlyphs = map[rune][]string{
 	'0':             {"▄██▄", "█  █", "█  █", "█  █", "▀██▀"},
 	'1':             {" ▄█ ", "  █ ", "  █ ", "  █ ", "▀▀▀▀"},
@@ -452,6 +676,25 @@ var halfBlockGlyphs = map[rune][]string{
 	'A':             {"▄██▄", "█  █", "████", "█  █", "█  █"},
 	'P':             {"███▄", "█  █", "███▀", "█   ", "█   "},
 	'M':             {"█  █", "████", "████", "█  █", "█  █"},
+}
+
+var halfBlockGlyphs2x = map[rune][]string{
+	'0':             {"▄██████▄", "█      █", "█      █", "█      █", "█      █", "█      █", "█      █", "█      █", "█      █", "▀██████▀"},
+	'1':             {"   ▄█   ", "  ▄██   ", " ▄█ █   ", "    █   ", "    █   ", "    █   ", "    █   ", "    █   ", "    █   ", "▀▀▀▀▀▀▀▀"},
+	'2':             {"▄██████▄", "       █", "       █", "       █", "       █", "▄██████▀", "█       ", "█       ", "█       ", "▀▀▀▀▀▀▀▀"},
+	'3':             {"▄██████▄", "       █", "       █", "       █", "       █", " ▀█████▄", "       █", "       █", "       █", "▀██████▀"},
+	'4':             {"█      █", "█      █", "█      █", "█      █", "█      █", "▀▀▀▀▀▀▀█", "       █", "       █", "       █", "       █"},
+	'5':             {"████████", "█       ", "█       ", "█       ", "█       ", "▀██████▄", "       █", "       █", "       █", "▀██████▀"},
+	'6':             {"▄██████▀", "█       ", "█       ", "█       ", "█       ", "███████▄", "█      █", "█      █", "█      █", "▀██████▀"},
+	'7':             {"████████", "       █", "       █", "      █ ", "     █  ", "    █   ", "   █    ", "  █     ", "  █     ", "  █     "},
+	'8':             {"▄██████▄", "█      █", "█      █", "█      █", "█      █", "▄██████▄", "█      █", "█      █", "█      █", "▀██████▀"},
+	'9':             {"▄██████▄", "█      █", "█      █", "█      █", "█      █", "▀███████", "       █", "       █", "       █", "▀██████▀"},
+	':':             {"        ", "        ", "  ████  ", "  ████  ", "        ", "        ", "  ████  ", "  ████  ", "        ", "        "},
+	HiddenSeparator: {"        ", "        ", "        ", "        ", "        ", "        ", "        ", "        ", "        ", "        "},
+	' ':             {"        ", "        ", "        ", "        ", "        ", "        ", "        ", "        ", "        ", "        "},
+	'A':             {"▄██████▄", "█      █", "█      █", "█      █", "█      █", "████████", "█      █", "█      █", "█      █", "█      █"},
+	'P':             {"███████▄", "█      █", "█      █", "█      █", "█      █", "███████▀", "█       ", "█       ", "█       ", "█       "},
+	'M':             {"█      █", "██    ██", "███  ███", "████████", "█  ██  █", "█      █", "█      █", "█      █", "█      █", "█      █"},
 }
 
 var nerdGlyphs = map[rune][]string{

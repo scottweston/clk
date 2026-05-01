@@ -120,6 +120,45 @@ func TestBrailleClockScalesByRepackingDots(t *testing.T) {
 	}
 }
 
+func TestLargeDigitStyleVariants(t *testing.T) {
+	cases := []struct {
+		style string
+		rows  int
+	}{
+		{style: "block_2x", rows: 10},
+		{style: "braille_2x", rows: 4},
+		{style: "braille_4x", rows: 7},
+		{style: "box_2x", rows: 10},
+		{style: "half_block_2x", rows: 10},
+	}
+	for _, tc := range cases {
+		out := Clock("12:34", tc.style, false)
+		lines := Lines(out)
+		if len(lines) != tc.rows {
+			t.Fatalf("%s expected %d rows, got %d: %q", tc.style, tc.rows, len(lines), out)
+		}
+		for _, line := range lines {
+			if lipgloss.Width(line) != lipgloss.Width(lines[0]) {
+				t.Fatalf("%s expected equal-width lines, got %q", tc.style, out)
+			}
+		}
+	}
+}
+
+func TestExternalClockIgnoresScale(t *testing.T) {
+	normal, ok := externalClock("12:34", "toilet", "standard", 1)
+	if !ok {
+		t.Skip("toilet is not available")
+	}
+	scaled, ok := externalClock("12:34", "toilet", "standard", 2)
+	if !ok {
+		t.Skip("toilet is not available")
+	}
+	if normal != scaled {
+		t.Fatal("expected external fonts to ignore scale")
+	}
+}
+
 func TestHiddenSeparatorKeepsBrailleClockWidthStable(t *testing.T) {
 	visible := Clock("13:14", "braille", false)
 	hidden := Clock("13"+string(HiddenSeparator)+"14", "braille", false)

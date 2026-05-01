@@ -59,6 +59,38 @@ func TestWorkdaySettingsChangeNoConfig(t *testing.T) {
 	}
 }
 
+func TestSettingsDoNotExposeClockSize(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	for _, item := range m.settingItems() {
+		if item.label == "Clock size" {
+			t.Fatal("expected clock size setting to be removed")
+		}
+	}
+}
+
+func TestSettingsOnlyExposeRelevantExternalFontSelector(t *testing.T) {
+	cases := []struct {
+		style      string
+		wantFiglet bool
+		wantToilet bool
+	}{
+		{style: "block"},
+		{style: "figlet", wantFiglet: true},
+		{style: "toilet", wantToilet: true},
+	}
+	for _, tc := range cases {
+		cfg := config.Default()
+		cfg.Display.DigitStyle = tc.style
+		m := New(cfg, config.NewManager("", true))
+
+		gotFiglet := hasSettingItem(m, "Figlet font")
+		gotToilet := hasSettingItem(m, "Toilet font")
+		if gotFiglet != tc.wantFiglet || gotToilet != tc.wantToilet {
+			t.Fatalf("%s settings figlet=%v toilet=%v, want figlet=%v toilet=%v", tc.style, gotFiglet, gotToilet, tc.wantFiglet, tc.wantToilet)
+		}
+	}
+}
+
 func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
 	m.settings = true
@@ -80,6 +112,15 @@ func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
 	if !strings.Contains(out, "[x] Monday") || !strings.Contains(out, "[ ] Saturday") {
 		t.Fatalf("expected checkbox workday rows, got %q", out)
 	}
+}
+
+func hasSettingItem(m Model, label string) bool {
+	for _, item := range m.settingItems() {
+		if item.label == label {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWorkdayCheckboxToggleNoConfig(t *testing.T) {
