@@ -37,11 +37,14 @@ Current config fields include:
 - `display.digit_style`: `block`, `braille`, `box`, `half_block`, `nerd_segment`, `figlet`, `toilet`.
 - `display.figlet_font`: selected font for `figlet` style.
 - `display.toilet_font`: selected font for `toilet` style.
-- `display.seconds_style`: `hidden`, `numeric`, `progress_bar`, `bubble_progress`, `ascii_circle`, `braille_circle`, `nerd_pulse`, `pomodoro`.
+- `display.seconds_style`: `hidden`, `numeric`, `progress_bar`, `bubble_progress`, `ascii_circle`, `braille_circle`, `nerd_pulse`, `pomodoro`, `workday`.
 - `display.inline_seconds`: independent on/off toggle for rendering seconds in the main clock line.
 - `display.size`: `normal` or `double`.
 - `display.blink_separator`: hides separators on odd seconds using a width-stable hidden separator glyph.
 - `display.alignment`: `left`, `center`, or `right`.
+- `workday.start_time`: start of the configured workday, chosen from half-hour `HH:MM` values.
+- `workday.end_time`: end of the configured workday, chosen from half-hour `HH:MM` values.
+- `workday.days`: active workdays using `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`; configured through the `Work days` checkbox submenu.
 - `theme.name` and `theme.accent`: built-in theme palette and accent color.
 - `ui.nerd_font`: enables Nerd Font-specific glyph choices where available.
 
@@ -56,6 +59,7 @@ Normalization is intentionally conservative. Unknown enum values fall back to de
 - External glyphs are cached per command/font/rune to avoid spawning commands every frame for repeated characters.
 - Layout uses `joinVerticalWithBackground` instead of raw centered `lipgloss.JoinVertical` where theme-background padding matters. This avoids transparent/default terminal whitespace around shorter rows.
 - Bubble Progress seconds renderers use the active theme background for empty cells and percentage text; do not rely only on wrapping the progress output in a Lip Gloss background.
+- Workday progress is 0% before the configured start time, fills to 100% between start and end, remains 100% after the end time, and resets to 0% on the next non-completed workday/off day.
 
 ## Testing
 
@@ -72,5 +76,6 @@ Tests cover config normalization/migration, renderer output, width stability for
 - Prefer extending existing enums and settings items over adding one-off paths.
 - Keep renderer behavior width-stable; avoid changes that make blinking separators or optional seconds display shift the main clock.
 - Preserve theme backgrounds on all padding, borders, progress bars, and overlay joins.
+- Keep settings submenus keyboard-driven and width-stable; the workday checkbox submenu uses Bubble Tea model state with `[x]` / `[ ]` rows.
 - Keep external command support optional and failure-tolerant.
 - Run `gofmt -w internal cmd` and `go test ./...` before handing off changes.

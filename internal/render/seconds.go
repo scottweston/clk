@@ -17,6 +17,13 @@ type SecondsOptions struct {
 	NerdFont   bool
 	Background string
 	Accent     string
+	Workday    WorkdayOptions
+}
+
+type WorkdayOptions struct {
+	StartTime string
+	EndTime   string
+	Days      []string
 }
 
 func Seconds(now time.Time, style string, width int, nerdFont bool) string {
@@ -50,6 +57,8 @@ func SecondsStyled(opts SecondsOptions) string {
 		return progressBar(progress, opts.Width)
 	case "pomodoro":
 		return pomodoro(now, opts.Width, opts.Background, opts.Accent)
+	case "workday":
+		return workday(now, opts.Width, opts.Background, opts.Accent, opts.Workday)
 	default:
 		return progressBar(progress, opts.Width)
 	}
@@ -76,9 +85,6 @@ func progressBar(progress float64, width int) string {
 func normalizeBarWidth(width int) int {
 	if width < 12 {
 		return 12
-	}
-	if width > 60 {
-		return 60
 	}
 	return width
 }
@@ -111,6 +117,87 @@ func pomodoro(now time.Time, width int, background, accent string) string {
 	barWidth := normalizeBarWidth(width - 16)
 	bar := bubbleProgress(float64(elapsed)/float64(period), barWidth, background, accent)
 	return fmt.Sprintf("%s %02d:%02d %s", label, int(remaining.Minutes()), int(remaining.Seconds())%60, bar)
+}
+
+func workday(now time.Time, width int, background, accent string, opts WorkdayOptions) string {
+	start, ok := parseClockMinutes(opts.StartTime)
+	if !ok {
+		start = 9 * 60
+	}
+	end, ok := parseClockMinutes(opts.EndTime)
+	if !ok {
+		end = 17 * 60
+	}
+	if end <= start {
+		end = start + 1
+	}
+
+	nowMinute := now.Hour()*60 + now.Minute()
+	workingDay := isConfiguredWorkday(now.Weekday(), opts.Days)
+	progress := 0.0
+	remaining := time.Duration(end-nowMinute)*time.Minute - time.Duration(now.Second())*time.Second - time.Duration(now.Nanosecond())
+	label := "workday"
+
+	switch {
+	case !workingDay:
+		progress = 0
+		remaining = 0
+		label = "off"
+	case nowMinute < start:
+		progress = 0
+		remaining = time.Duration(end-start) * time.Minute
+	case nowMinute >= end:
+		progress = 1
+		remaining = 0
+	default:
+		elapsed := time.Duration(nowMinute-start)*time.Minute + time.Duration(now.Second())*time.Second + time.Duration(now.Nanosecond())
+		total := time.Duration(end-start) * time.Minute
+		progress = float64(elapsed) / float64(total)
+	}
+
+	barWidth := normalizeBarWidth(width - 20)
+	bar := bubbleProgress(progress, barWidth, background, accent)
+	return fmt.Sprintf("%s %02d:%02d %s", label, int(remaining.Hours()), int(remaining.Minutes())%60, bar)
+}
+
+func parseClockMinutes(value string) (int, bool) {
+	t, err := time.Parse("15:04", value)
+	if err != nil {
+		return 0, false
+	}
+	return t.Hour()*60 + t.Minute(), true
+}
+
+func isConfiguredWorkday(day time.Weekday, days []string) bool {
+	if len(days) == 0 {
+		days = []string{"mon", "tue", "wed", "thu", "fri"}
+	}
+	current := weekdayName(day)
+	for _, configured := range days {
+		if configured == current {
+			return true
+		}
+	}
+	return false
+}
+
+func weekdayName(day time.Weekday) string {
+	switch day {
+	case time.Monday:
+		return "mon"
+	case time.Tuesday:
+		return "tue"
+	case time.Wednesday:
+		return "wed"
+	case time.Thursday:
+		return "thu"
+	case time.Friday:
+		return "fri"
+	case time.Saturday:
+		return "sat"
+	default:
+		return "sun"
+	}
 }
 
 func defaultColor(value, fallback string) string {

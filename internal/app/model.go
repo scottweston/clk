@@ -24,6 +24,8 @@ type Model struct {
 	settings  bool
 	helpOpen  bool
 	cursor    int
+	workdays  bool
+	dayCursor int
 	saveError string
 	help      help.Model
 	keys      keyMap
@@ -101,22 +103,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Back):
 		if m.helpOpen {
 			m.helpOpen = false
+		} else if m.workdays {
+			m.workdays = false
 		} else if m.settings {
 			m.settings = false
 		}
-	case m.settings && key.Matches(msg, m.keys.Up):
+	case m.settings && m.workdays && key.Matches(msg, m.keys.Up):
+		if m.dayCursor > 0 {
+			m.dayCursor--
+		}
+	case m.settings && m.workdays && key.Matches(msg, m.keys.Down):
+		if m.dayCursor < len(config.WorkdayNames)-1 {
+			m.dayCursor++
+		}
+	case m.settings && m.workdays && key.Matches(msg, m.keys.Choose):
+		m.toggleWorkday(config.WorkdayNames[m.dayCursor])
+	case m.settings && !m.workdays && key.Matches(msg, m.keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
 		}
-	case m.settings && key.Matches(msg, m.keys.Down):
+	case m.settings && !m.workdays && key.Matches(msg, m.keys.Down):
 		if m.cursor < len(m.settingItems())-1 {
 			m.cursor++
 		}
-	case m.settings && key.Matches(msg, m.keys.Left):
+	case m.settings && !m.workdays && key.Matches(msg, m.keys.Left):
 		m.changeSetting(-1)
-	case m.settings && key.Matches(msg, m.keys.Right):
+	case m.settings && !m.workdays && key.Matches(msg, m.keys.Right):
 		m.changeSetting(1)
-	case m.settings && key.Matches(msg, m.keys.Choose):
+	case m.settings && !m.workdays && key.Matches(msg, m.keys.Choose):
 		m.changeSetting(1)
 	}
 	return m, nil
@@ -127,7 +141,28 @@ func (m *Model) changeSetting(delta int) {
 	if m.cursor < 0 || m.cursor >= len(items) {
 		return
 	}
+	if items[m.cursor].submenu == "workdays" {
+		m.workdays = true
+		return
+	}
 	items[m.cursor].change(delta, &m.cfg)
+	m.cfg.Normalize()
+	if err := m.manager.Save(m.cfg); err != nil {
+		m.saveError = fmt.Sprintf("config save failed: %v", err)
+		return
+	}
+	m.saveError = ""
+}
+
+func (m *Model) toggleWorkday(day string) {
+	if containsString(m.cfg.Workday.Days, day) {
+		if len(m.cfg.Workday.Days) <= 1 {
+			return
+		}
+		m.cfg.Workday.Days = removeString(m.cfg.Workday.Days, day)
+	} else {
+		m.cfg.Workday.Days = append(m.cfg.Workday.Days, day)
+	}
 	m.cfg.Normalize()
 	if err := m.manager.Save(m.cfg); err != nil {
 		m.saveError = fmt.Sprintf("config save failed: %v", err)
@@ -154,7 +189,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		lines = append(lines, "")
 		lines = append(lines, styles.Date.Render(now.Format("Monday, 02 Jan 2006")))
 	}
-	secondsWidth := m.width / 3
+	secondsWidth := m.progressWidth(clockArt)
 	seconds := render.SecondsStyled(render.SecondsOptions{
 		Time:       now,
 		Style:      m.cfg.Display.SecondsStyle,
@@ -162,12 +197,29 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		NerdFont:   m.cfg.UI.NerdFont,
 		Background: background,
 		Accent:     theme.Accent(theme.Lookup(m.cfg.Theme.Name), m.cfg.Theme.Accent),
+		Workday: render.WorkdayOptions{
+			StartTime: m.cfg.Workday.StartTime,
+			EndTime:   m.cfg.Workday.EndTime,
+			Days:      m.cfg.Workday.Days,
+		},
 	})
 	if seconds != "" {
 		lines = append(lines, "")
 		lines = append(lines, styles.Seconds.Render(seconds))
 	}
 	return joinVerticalWithBackground(lipgloss.Center, background, lines...)
+}
+
+func (m Model) progressWidth(clockArt string) int {
+	width := lipgloss.Width(clockArt)
+	viewportWidth := m.width - 8
+	if viewportWidth < 0 {
+		viewportWidth = 0
+	}
+	if viewportWidth > width {
+		width = viewportWidth
+	}
+	return width
 }
 
 func (m Model) displayTime() time.Time {
@@ -215,6 +267,10 @@ func (m Model) clockScale() int {
 }
 
 func (m Model) settingsView(styles theme.Stylesheet) string {
+	if m.workdays {
+		return m.workdaysView(styles)
+	}
+
 	items := m.settingItems()
 	rows := []string{styles.Muted.Render("Settings")}
 	for i, item := range items {
@@ -230,10 +286,30 @@ func (m Model) settingsView(styles theme.Stylesheet) string {
 	return styles.Panel.Render(strings.Join(rows, "\n"))
 }
 
+func (m Model) workdaysView(styles theme.Stylesheet) string {
+	rows := []string{styles.Muted.Render("Work Days")}
+	for i, day := range config.WorkdayNames {
+		box := "[ ]"
+		if containsString(m.cfg.Workday.Days, day) {
+			box = "[x]"
+		}
+		row := fmt.Sprintf("%s %-9s", box, workdayLabel(day))
+		if i == m.dayCursor {
+			row = styles.Selected.Render(" " + row + " ")
+		} else {
+			row = " " + row + " "
+		}
+		rows = append(rows, row)
+	}
+	rows = append(rows, "", styles.Muted.Render("enter/space toggles • esc returns • autosaves"))
+	return styles.Panel.Render(strings.Join(rows, "\n"))
+}
+
 type settingItem struct {
-	label  string
-	value  func(config.Config) string
-	change func(delta int, cfg *config.Config)
+	label   string
+	value   func(config.Config) string
+	change  func(delta int, cfg *config.Config)
+	submenu string
 }
 
 func (m Model) settingItems() []settingItem {
@@ -249,8 +325,20 @@ func (m Model) settingItems() []settingItem {
 		toggleItem("Blink sep", func(c config.Config) bool { return c.Display.BlinkSeparator }, func(v bool, c *config.Config) { c.Display.BlinkSeparator = v }),
 		toggleItem("Inline sec", func(c config.Config) bool { return c.Display.InlineSeconds }, func(v bool, c *config.Config) { c.Display.InlineSeconds = v }),
 		cycleItem("Seconds", func(c config.Config) string { return c.Display.SecondsStyle }, func(v string, c *config.Config) { c.Display.SecondsStyle = v }, config.SecondsStyles),
+		cycleItem("Work start", func(c config.Config) string { return c.Workday.StartTime }, func(v string, c *config.Config) { c.Workday.StartTime = v }, config.TimeChoices),
+		cycleItem("Work end", func(c config.Config) string { return c.Workday.EndTime }, func(v string, c *config.Config) { c.Workday.EndTime = v }, config.TimeChoices),
+		submenuItem("Work days", func(c config.Config) string { return strings.Join(c.Workday.Days, ",") }, "workdays"),
 		cycleItem("Alignment", func(c config.Config) string { return c.Display.Alignment }, func(v string, c *config.Config) { c.Display.Alignment = v }, config.Alignments),
 		toggleItem("Nerd Font", func(c config.Config) bool { return c.UI.NerdFont }, func(v bool, c *config.Config) { c.UI.NerdFont = v }),
+	}
+}
+
+func submenuItem(label string, value func(config.Config) string, submenu string) settingItem {
+	return settingItem{
+		label:   label,
+		value:   value,
+		submenu: submenu,
+		change:  func(_ int, _ *config.Config) {},
 	}
 }
 
@@ -283,6 +371,44 @@ func toggleItem(label string, get func(config.Config) bool, set func(bool, *conf
 			set(!get(*cfg), cfg)
 		},
 	}
+}
+
+func containsString(values []string, value string) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
+}
+
+func workdayLabel(day string) string {
+	switch day {
+	case "mon":
+		return "Monday"
+	case "tue":
+		return "Tuesday"
+	case "wed":
+		return "Wednesday"
+	case "thu":
+		return "Thursday"
+	case "fri":
+		return "Friday"
+	case "sat":
+		return "Saturday"
+	default:
+		return "Sunday"
+	}
+}
+
+func removeString(values []string, value string) []string {
+	out := values[:0]
+	for _, candidate := range values {
+		if candidate != value {
+			out = append(out, candidate)
+		}
+	}
+	return out
 }
 
 func tick() tea.Cmd {

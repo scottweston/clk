@@ -19,6 +19,7 @@ type Config struct {
 	Version int           `yaml:"version"`
 	Time    TimeConfig    `yaml:"time"`
 	Display DisplayConfig `yaml:"display"`
+	Workday WorkdayConfig `yaml:"workday"`
 	Theme   ThemeConfig   `yaml:"theme"`
 	UI      UIConfig      `yaml:"ui"`
 }
@@ -38,6 +39,12 @@ type DisplayConfig struct {
 	Alignment      string `yaml:"alignment"`
 	Size           string `yaml:"size"`
 	BlinkSeparator bool   `yaml:"blink_separator"`
+}
+
+type WorkdayConfig struct {
+	StartTime string   `yaml:"start_time"`
+	EndTime   string   `yaml:"end_time"`
+	Days      []string `yaml:"days"`
 }
 
 type ThemeConfig struct {
@@ -75,6 +82,11 @@ func Default() Config {
 			Alignment:      "center",
 			Size:           "normal",
 			BlinkSeparator: false,
+		},
+		Workday: WorkdayConfig{
+			StartTime: "09:00",
+			EndTime:   "17:00",
+			Days:      []string{"mon", "tue", "wed", "thu", "fri"},
 		},
 		Theme: ThemeConfig{
 			Name:   "tokyo-night",
@@ -180,6 +192,13 @@ func (c *Config) Normalize() {
 	if !contains(Sizes, c.Display.Size) {
 		c.Display.Size = "normal"
 	}
+	if !contains(TimeChoices, c.Workday.StartTime) {
+		c.Workday.StartTime = "09:00"
+	}
+	if !contains(TimeChoices, c.Workday.EndTime) {
+		c.Workday.EndTime = "17:00"
+	}
+	c.Workday.Days = normalizeWorkdays(c.Workday.Days)
 	if c.Theme.Name == "" {
 		c.Theme.Name = "tokyo-night"
 	}
@@ -213,11 +232,25 @@ var SecondsStyles = []string{
 	"braille_circle",
 	"nerd_pulse",
 	"pomodoro",
+	"workday",
 }
 
 var Alignments = []string{"left", "center", "right"}
 
 var Sizes = []string{"normal", "double"}
+
+var TimeChoices = []string{
+	"00:00", "00:30", "01:00", "01:30", "02:00", "02:30",
+	"03:00", "03:30", "04:00", "04:30", "05:00", "05:30",
+	"06:00", "06:30", "07:00", "07:30", "08:00", "08:30",
+	"09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+	"12:00", "12:30", "13:00", "13:30", "14:00", "14:30",
+	"15:00", "15:30", "16:00", "16:30", "17:00", "17:30",
+	"18:00", "18:30", "19:00", "19:30", "20:00", "20:30",
+	"21:00", "21:30", "22:00", "22:30", "23:00", "23:30",
+}
+
+var WorkdayNames = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 var Accents = []string{"cyan", "green", "pink", "purple", "yellow", "orange", "red", "blue"}
 
@@ -228,4 +261,19 @@ func contains(values []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeWorkdays(days []string) []string {
+	seen := make(map[string]bool, len(days))
+	out := make([]string, 0, len(days))
+	for _, day := range WorkdayNames {
+		if contains(days, day) && !seen[day] {
+			out = append(out, day)
+			seen[day] = true
+		}
+	}
+	if len(out) == 0 {
+		return []string{"mon", "tue", "wed", "thu", "fri"}
+	}
+	return out
 }

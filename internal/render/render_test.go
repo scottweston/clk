@@ -138,7 +138,7 @@ func TestHiddenSeparatorKeepsBrailleClockWidthStable(t *testing.T) {
 
 func TestSecondsStyles(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 30, 0, time.Local)
-	cases := []string{"numeric", "progress_bar", "bubble_progress", "ascii_circle", "braille_circle", "nerd_pulse", "pomodoro", "hidden"}
+	cases := []string{"numeric", "progress_bar", "bubble_progress", "ascii_circle", "braille_circle", "nerd_pulse", "pomodoro", "workday", "hidden"}
 	for _, style := range cases {
 		got := Seconds(now, style, 20, false)
 		if style != "hidden" && got == "" {
@@ -162,6 +162,14 @@ func TestProgressBarBounds(t *testing.T) {
 	}
 }
 
+func TestProgressBarCanExceedSixtyColumns(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 30, 0, time.Local)
+	got := Seconds(now, "progress_bar", 90, false)
+	if len([]rune(got)) != 92 {
+		t.Fatalf("expected 90-column bar plus brackets, got width %d in %q", len([]rune(got)), got)
+	}
+}
+
 func TestBubbleProgressUsesBubblesProgressBar(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 30, 0, time.Local)
 	got := Seconds(now, "bubble_progress", 24, false)
@@ -179,6 +187,38 @@ func TestPomodoroRendersCurrentCycle(t *testing.T) {
 	breakTime := time.Date(2026, 5, 1, 12, 26, 0, 0, time.Local)
 	if got := Seconds(breakTime, "pomodoro", 40, false); !strings.Contains(got, "break") {
 		t.Fatalf("expected break cycle, got %q", got)
+	}
+}
+
+func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
+	opts := SecondsOptions{
+		Style: "workday",
+		Width: 48,
+		Workday: WorkdayOptions{
+			StartTime: "09:00",
+			EndTime:   "17:00",
+			Days:      []string{"mon", "tue", "wed", "thu", "fri"},
+		},
+	}
+
+	opts.Time = time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local)
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 08:00") || !strings.Contains(got, "  0%") {
+		t.Fatalf("expected pre-workday 0%% with full remaining time, got %q", got)
+	}
+
+	opts.Time = time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local)
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 04:00") || !strings.Contains(got, " 50%") {
+		t.Fatalf("expected mid-workday 50%%, got %q", got)
+	}
+
+	opts.Time = time.Date(2026, 5, 1, 18, 0, 0, 0, time.Local)
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 00:00") || !strings.Contains(got, "100%") {
+		t.Fatalf("expected after-workday 100%%, got %q", got)
+	}
+
+	opts.Time = time.Date(2026, 5, 2, 13, 0, 0, 0, time.Local)
+	if got := SecondsStyled(opts); !strings.Contains(got, "off 00:00") || !strings.Contains(got, "  0%") {
+		t.Fatalf("expected off day reset, got %q", got)
 	}
 }
 

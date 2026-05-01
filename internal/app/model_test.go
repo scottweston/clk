@@ -10,6 +10,7 @@ import (
 
 	"clk/internal/config"
 	"clk/internal/render"
+	"clk/internal/theme"
 )
 
 func TestModelRendersClock(t *testing.T) {
@@ -38,6 +39,75 @@ func TestSettingsChangeAutosavesNoConfig(t *testing.T) {
 	}
 	if m.saveError != "" {
 		t.Fatalf("unexpected save error: %s", m.saveError)
+	}
+}
+
+func TestWorkdaySettingsChangeNoConfig(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.settings = true
+	items := m.settingItems()
+	for i, item := range items {
+		if item.label == "Work start" {
+			m.cursor = i
+			break
+		}
+	}
+
+	m.changeSetting(1)
+	if m.cfg.Workday.StartTime == "09:00" {
+		t.Fatal("expected work start setting to change")
+	}
+}
+
+func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.settings = true
+	items := m.settingItems()
+	for i, item := range items {
+		if item.label == "Work days" {
+			m.cursor = i
+			break
+		}
+	}
+
+	m.changeSetting(1)
+	if !m.workdays {
+		t.Fatal("expected workdays submenu to open")
+	}
+
+	out := m.settingsView(testStyles())
+	if !strings.Contains(out, "[x] Monday") || !strings.Contains(out, "[ ] Saturday") {
+		t.Fatalf("expected checkbox workday rows, got %q", out)
+	}
+}
+
+func TestWorkdayCheckboxToggleNoConfig(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.settings = true
+	m.workdays = true
+	m.dayCursor = 5
+
+	m.toggleWorkday("sat")
+	if !containsString(m.cfg.Workday.Days, "sat") {
+		t.Fatalf("expected saturday enabled, got %+v", m.cfg.Workday.Days)
+	}
+	if m.saveError != "" {
+		t.Fatalf("unexpected save error: %s", m.saveError)
+	}
+}
+
+func TestBackClosesWorkdaySubmenu(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.settings = true
+	m.workdays = true
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated := next.(Model)
+	if updated.workdays {
+		t.Fatal("expected workdays submenu to close")
+	}
+	if !updated.settings {
+		t.Fatal("expected settings to remain open")
 	}
 }
 
@@ -117,6 +187,26 @@ func TestInlineSecondsCanCombineWithProgressDisplay(t *testing.T) {
 	}
 }
 
+func TestProgressWidthUsesClockWidthAsMinimum(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.width = 20
+	clockArt := render.Clock("13:14", "block", false)
+
+	if got := m.progressWidth(clockArt); got != lipgloss.Width(clockArt) {
+		t.Fatalf("expected progress width to match clock width, got %d want %d", got, lipgloss.Width(clockArt))
+	}
+}
+
+func TestProgressWidthExpandsWithWindow(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.width = 160
+	clockArt := render.Clock("13:14", "block", false)
+
+	if got := m.progressWidth(clockArt); got <= lipgloss.Width(clockArt) {
+		t.Fatalf("expected progress width to expand beyond clock width, got %d clock %d", got, lipgloss.Width(clockArt))
+	}
+}
+
 func TestJoinVerticalWithBackgroundPadsToEqualWidths(t *testing.T) {
 	out := joinVerticalWithBackground(lipgloss.Center, "#000000", "wide line", "short")
 	lines := strings.Split(out, "\n")
@@ -150,4 +240,8 @@ func TestSettingsViewPadsToEqualWidths(t *testing.T) {
 			t.Fatalf("expected all settings screen lines to have width %d, got %d in %q", expected, width, line)
 		}
 	}
+}
+
+func testStyles() theme.Stylesheet {
+	return theme.Styles(theme.Lookup("tokyo-night"), "cyan")
 }
