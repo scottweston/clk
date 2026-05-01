@@ -176,10 +176,10 @@ func (c *Config) Normalize() {
 		c.Display.DigitStyle = doubleDigitStyle(c.Display.DigitStyle)
 	}
 	c.Display.Size = ""
-	if !contains(FigletFonts, c.Display.FigletFont) {
+	if !contains(FigletFontChoices(), c.Display.FigletFont) {
 		c.Display.FigletFont = "standard"
 	}
-	if !contains(ToiletFonts, c.Display.ToiletFont) {
+	if !contains(ToiletFontChoices(), c.Display.ToiletFont) {
 		c.Display.ToiletFont = "standard"
 	}
 	if c.Display.SecondsStyle == "inline" {
@@ -223,10 +223,6 @@ var DigitStyles = []string{
 	"figlet",
 	"toilet",
 }
-
-var FigletFonts = []string{"standard", "big", "block", "bubble", "digital", "mini", "script", "slant", "small"}
-
-var ToiletFonts = []string{"standard", "term", "future", "mono12", "smblock", "smmono12", "pagga", "emboss"}
 
 var SecondsStyles = []string{
 	"hidden",

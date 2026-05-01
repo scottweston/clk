@@ -3,6 +3,7 @@ package render
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -233,7 +234,7 @@ func externalGlyph(tool, font string, r rune) ([]string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 
-	args := []string{"-f", font, string(r)}
+	args := externalFontArgs(font, string(r))
 	cmd := exec.CommandContext(ctx, tool, args...)
 	out, err := cmd.Output()
 	if err != nil {
@@ -247,6 +248,17 @@ func externalGlyph(tool, font string, r rune) ([]string, bool) {
 	}
 	externalGlyphCache.Store(key, lines)
 	return lines, true
+}
+
+func externalFontArgs(font string, message string) []string {
+	if isFontPath(font) {
+		return []string{"-d", filepath.Dir(font), "-f", strings.TrimSuffix(filepath.Base(font), filepath.Ext(font)), message}
+	}
+	return []string{"-f", font, message}
+}
+
+func isFontPath(font string) bool {
+	return filepath.IsAbs(font) || strings.ContainsAny(font, `/\`)
 }
 
 func normalizeGlyphs(glyphs map[rune][]string) map[rune][]string {

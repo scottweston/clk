@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -90,6 +91,48 @@ func TestNormalizeMigratesDoubleSizeToDigitStyle(t *testing.T) {
 	}
 }
 
+func TestFigletFontChoicesIncludeUserFonts(t *testing.T) {
+	resetFigletFontCache()
+	t.Cleanup(resetFigletFontCache)
+
+	xdgData := t.TempDir()
+	fontPath := filepath.Join(xdgData, "figlet", "custom-clock.flf")
+	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
+		t.Fatalf("create font dir: %v", err)
+	}
+	if err := os.WriteFile(fontPath, []byte("flf2a$ 1 1 1 0 1\n"), 0o600); err != nil {
+		t.Fatalf("write font: %v", err)
+	}
+	t.Setenv("XDG_DATA_HOME", xdgData)
+
+	want := strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
+	if !contains(FigletFontChoices(), want) {
+		t.Fatalf("expected discovered user font %q in choices", want)
+	}
+}
+
+func TestNormalizeAcceptsDiscoveredUserFigletFont(t *testing.T) {
+	resetFigletFontCache()
+	t.Cleanup(resetFigletFontCache)
+
+	xdgData := t.TempDir()
+	fontPath := filepath.Join(xdgData, "figlet", "custom-clock.flf")
+	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
+		t.Fatalf("create font dir: %v", err)
+	}
+	if err := os.WriteFile(fontPath, []byte("flf2a$ 1 1 1 0 1\n"), 0o600); err != nil {
+		t.Fatalf("write font: %v", err)
+	}
+	t.Setenv("XDG_DATA_HOME", xdgData)
+
+	cfg := Default()
+	cfg.Display.FigletFont = strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
+	cfg.Normalize()
+	if cfg.Display.FigletFont != strings.TrimSuffix(fontPath, filepath.Ext(fontPath)) {
+		t.Fatalf("expected discovered font to be preserved, got %q", cfg.Display.FigletFont)
+	}
+}
+
 func TestNormalizeMigratesInlineSecondsStyle(t *testing.T) {
 	cfg := Default()
 	cfg.Display.SecondsStyle = "inline"
@@ -101,6 +144,11 @@ func TestNormalizeMigratesInlineSecondsStyle(t *testing.T) {
 	if cfg.Display.SecondsStyle != "hidden" {
 		t.Fatalf("expected migrated seconds style hidden, got %q", cfg.Display.SecondsStyle)
 	}
+}
+
+func resetFigletFontCache() {
+	figletFontsOnce = sync.Once{}
+	figletFonts = nil
 }
 
 func TestNoConfigSkipsDisk(t *testing.T) {

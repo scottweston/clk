@@ -1,6 +1,7 @@
 package render
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +157,15 @@ func TestExternalClockIgnoresScale(t *testing.T) {
 	}
 	if normal != scaled {
 		t.Fatal("expected external fonts to ignore scale")
+	}
+}
+
+func TestExternalFontArgsUseDirectoryForFontPaths(t *testing.T) {
+	path := filepath.Join("tmp", "figlet", "custom-clock.flf")
+	got := externalFontArgs(path, "1")
+	want := []string{"-d", filepath.Join("tmp", "figlet"), "-f", "custom-clock", "1"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("external font args = %#v, want %#v", got, want)
 	}
 }
 
