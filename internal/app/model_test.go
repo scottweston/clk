@@ -91,6 +91,52 @@ func TestSettingsOnlyExposeRelevantExternalFontSelector(t *testing.T) {
 	}
 }
 
+func TestSlashOpensFontPickerForExternalFontSetting(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.DigitStyle = "figlet"
+	m := New(cfg, config.NewManager("", true))
+	m.settings = true
+	m.height = 30
+	m.cursor = settingIndex(m, "Figlet font")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
+	updated := next.(Model)
+	if !updated.fontPicker || updated.fontPickerKind != "figlet" {
+		t.Fatalf("expected figlet font picker to open, got picker=%v kind=%q", updated.fontPicker, updated.fontPickerKind)
+	}
+	if updated.fontQuery != "" {
+		t.Fatalf("expected empty initial query, got %q", updated.fontQuery)
+	}
+}
+
+func TestFontPickerFiltersAndSelectsFont(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.DigitStyle = "figlet"
+	m := New(cfg, config.NewManager("", true))
+	m.settings = true
+	m.fontPicker = true
+	m.fontPickerKind = "figlet"
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("slant")})
+	updated := next.(Model)
+	if updated.fontQuery != "slant" {
+		t.Fatalf("expected query slant, got %q", updated.fontQuery)
+	}
+	choices := updated.filteredFontChoices()
+	if len(choices) == 0 || choices[0] != "slant" {
+		t.Fatalf("expected slant match, got %+v", choices)
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(Model)
+	if updated.cfg.Display.FigletFont != "slant" {
+		t.Fatalf("expected selected figlet font slant, got %q", updated.cfg.Display.FigletFont)
+	}
+	if updated.fontPicker {
+		t.Fatal("expected picker to close after selection")
+	}
+}
+
 func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
 	m.settings = true
@@ -112,6 +158,15 @@ func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
 	if !strings.Contains(out, "[x] Monday") || !strings.Contains(out, "[ ] Saturday") {
 		t.Fatalf("expected checkbox workday rows, got %q", out)
 	}
+}
+
+func settingIndex(m Model, label string) int {
+	for i, item := range m.settingItems() {
+		if item.label == label {
+			return i
+		}
+	}
+	return -1
 }
 
 func hasSettingItem(m Model, label string) bool {

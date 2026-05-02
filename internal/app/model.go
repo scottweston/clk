@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,24 +18,29 @@ import (
 )
 
 type Model struct {
-	cfg             config.Config
-	manager         config.Manager
-	width           int
-	height          int
-	now             time.Time
-	settings        bool
-	helpOpen        bool
-	cursor          int
-	scrollOffset    int
-	dayScrollOffset int
-	workdays        bool
-	dayCursor       int
-	saveError       string
-	help            help.Model
-	progress        progress.Model
-	keys            keyMap
-	themeName       string
-	accentName      string
+	cfg              config.Config
+	manager          config.Manager
+	width            int
+	height           int
+	now              time.Time
+	settings         bool
+	helpOpen         bool
+	cursor           int
+	scrollOffset     int
+	dayScrollOffset  int
+	workdays         bool
+	dayCursor        int
+	fontPicker       bool
+	fontPickerKind   string
+	fontQuery        string
+	fontCursor       int
+	fontScrollOffset int
+	saveError        string
+	help             help.Model
+	progress         progress.Model
+	keys             keyMap
+	themeName        string
+	accentName       string
 }
 
 type tickMsg time.Time
@@ -102,6 +108,8 @@ func (m Model) View() string {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case m.settings && m.fontPicker:
+		m.handleFontPickerKey(msg)
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Help):
@@ -139,6 +147,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 		m.adjustScroll(len(m.settingItems()))
+	case m.settings && !m.workdays && msg.String() == "/":
+		m.openFontPicker()
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Left):
 		m.changeSetting(-1)
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Right):
@@ -147,6 +157,56 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.changeSetting(1)
 	}
 	return m, nil
+}
+
+func (m *Model) handleFontPickerKey(msg tea.KeyMsg) {
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		m.fontPicker = false
+	case key.Matches(msg, m.keys.Up):
+		if m.fontCursor > 0 {
+			m.fontCursor--
+		}
+		m.adjustFontScroll()
+	case key.Matches(msg, m.keys.Down):
+		if m.fontCursor < len(m.filteredFontChoices())-1 {
+			m.fontCursor++
+		}
+		m.adjustFontScroll()
+	case key.Matches(msg, m.keys.Choose):
+		m.chooseFont()
+	case msg.Type == tea.KeyBackspace || msg.Type == tea.KeyCtrlH:
+		if m.fontQuery != "" {
+			runes := []rune(m.fontQuery)
+			m.fontQuery = string(runes[:len(runes)-1])
+			m.fontCursor = 0
+			m.fontScrollOffset = 0
+		}
+	case msg.Type == tea.KeyRunes:
+		m.fontQuery += string(msg.Runes)
+		m.fontCursor = 0
+		m.fontScrollOffset = 0
+	}
+}
+
+func (m *Model) openFontPicker() {
+	items := m.settingItems()
+	if m.cursor < 0 || m.cursor >= len(items) {
+		return
+	}
+	switch items[m.cursor].label {
+	case "Figlet font":
+		m.fontPickerKind = "figlet"
+	case "Toilet font":
+		m.fontPickerKind = "toilet"
+	default:
+		return
+	}
+	m.fontPicker = true
+	m.fontQuery = ""
+	m.fontCursor = 0
+	m.fontScrollOffset = 0
+	m.alignFontCursorToCurrent()
 }
 
 func (m *Model) changeSetting(delta int) {
@@ -332,6 +392,37 @@ func (m *Model) adjustDayScroll() {
 	}
 }
 
+func (m *Model) adjustFontScroll() {
+	choices := m.filteredFontChoices()
+	if len(choices) == 0 {
+		m.fontCursor = 0
+		m.fontScrollOffset = 0
+		return
+	}
+	if m.fontCursor >= len(choices) {
+		m.fontCursor = len(choices) - 1
+	}
+	maxVisible := (m.height + 2) / 3
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	if m.fontCursor < m.fontScrollOffset {
+		m.fontScrollOffset = m.fontCursor
+	}
+	if m.fontCursor >= m.fontScrollOffset+maxVisible {
+		m.fontScrollOffset = m.fontCursor - maxVisible + 1
+	}
+	if m.fontScrollOffset < 0 {
+		m.fontScrollOffset = 0
+	}
+	if m.fontScrollOffset+maxVisible > len(choices) {
+		m.fontScrollOffset = len(choices) - maxVisible
+	}
+	if m.fontScrollOffset < 0 {
+		m.fontScrollOffset = 0
+	}
+}
+
 func (m Model) clockText(now time.Time) string {
 	timeFormat := "15:04"
 	if m.cfg.Display.InlineSeconds {
@@ -358,6 +449,9 @@ func (m Model) clockText(now time.Time) string {
 }
 
 func (m Model) settingsView(styles theme.Stylesheet) string {
+	if m.fontPicker {
+		return m.fontPickerView(styles)
+	}
 	if m.workdays {
 		return m.workdaysView(styles)
 	}
@@ -390,6 +484,48 @@ func (m Model) settingsView(styles theme.Stylesheet) string {
 		}
 	}
 	rows = append(rows, "", styles.Muted.Render("enter/right changes • esc closes • autosaves"))
+	return styles.Panel.Render(strings.Join(rows, "\n"))
+}
+
+func (m Model) fontPickerView(styles theme.Stylesheet) string {
+	choices := m.filteredFontChoices()
+	maxVisible := (m.height + 2) / 3
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	start := m.fontScrollOffset
+	end := start + maxVisible
+	if end > len(choices) {
+		end = len(choices)
+	}
+
+	title := "Figlet Fonts"
+	if m.fontPickerKind == "toilet" {
+		title = "Toilet Fonts"
+	}
+	rows := []string{
+		styles.Muted.Render(title),
+		fmt.Sprintf("/ %s", m.fontQuery),
+	}
+	for i := start; i < end; i++ {
+		row := fontChoiceLabel(choices[i])
+		if i == m.fontCursor {
+			row = styles.Selected.Render(" " + row + " ")
+		} else {
+			row = " " + row + " "
+		}
+		rows = append(rows, row)
+	}
+	if len(choices) == 0 {
+		rows = append(rows, styles.Muted.Render(" no matches "))
+	}
+	if len(choices) > maxVisible {
+		remaining := len(choices) - end
+		if remaining > 0 {
+			rows = append(rows, styles.Muted.Render(fmt.Sprintf("... %d more ▼", remaining)))
+		}
+	}
+	rows = append(rows, "", styles.Muted.Render("type filters • enter selects • esc returns"))
 	return styles.Panel.Render(strings.Join(rows, "\n"))
 }
 
@@ -500,6 +636,88 @@ func toggleItem(label string, get func(config.Config) bool, set func(bool, *conf
 			set(!get(*cfg), cfg)
 		},
 	}
+}
+
+func (m Model) fontChoices() []string {
+	if m.fontPickerKind == "toilet" {
+		return config.ToiletFontChoices()
+	}
+	return config.FigletFontChoices()
+}
+
+func (m Model) filteredFontChoices() []string {
+	choices := m.fontChoices()
+	query := strings.ToLower(strings.TrimSpace(m.fontQuery))
+	if query == "" {
+		return choices
+	}
+
+	out := make([]string, 0, len(choices))
+	for _, choice := range choices {
+		if strings.Contains(strings.ToLower(choice), query) || strings.Contains(strings.ToLower(fontChoiceLabel(choice)), query) {
+			out = append(out, choice)
+		}
+	}
+	sortFontChoices(out, query)
+	return out
+}
+
+func sortFontChoices(choices []string, query string) {
+	if query == "" {
+		return
+	}
+	isExact := func(choice string) bool {
+		return strings.ToLower(choice) == query || strings.ToLower(fontChoiceLabel(choice)) == query
+	}
+	sort.SliceStable(choices, func(i, j int) bool {
+		return isExact(choices[i]) && !isExact(choices[j])
+	})
+}
+
+func (m *Model) alignFontCursorToCurrent() {
+	current := m.cfg.Display.FigletFont
+	if m.fontPickerKind == "toilet" {
+		current = m.cfg.Display.ToiletFont
+	}
+	choices := m.filteredFontChoices()
+	for i, choice := range choices {
+		if choice == current {
+			m.fontCursor = i
+			m.adjustFontScroll()
+			return
+		}
+	}
+}
+
+func (m *Model) chooseFont() {
+	choices := m.filteredFontChoices()
+	if len(choices) == 0 || m.fontCursor < 0 || m.fontCursor >= len(choices) {
+		return
+	}
+	if m.fontPickerKind == "toilet" {
+		m.cfg.Display.ToiletFont = choices[m.fontCursor]
+	} else {
+		m.cfg.Display.FigletFont = choices[m.fontCursor]
+	}
+	m.cfg.Normalize()
+	if err := m.manager.Save(m.cfg); err != nil {
+		m.saveError = fmt.Sprintf("config save failed: %v", err)
+		return
+	}
+	m.saveError = ""
+	m.fontPicker = false
+}
+
+func fontChoiceLabel(choice string) string {
+	if strings.ContainsAny(choice, `/\`) {
+		parts := strings.FieldsFunc(choice, func(r rune) bool {
+			return r == '/' || r == '\\'
+		})
+		if len(parts) > 0 {
+			return parts[len(parts)-1]
+		}
+	}
+	return choice
 }
 
 func containsString(values []string, value string) bool {
