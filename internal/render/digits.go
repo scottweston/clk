@@ -17,6 +17,9 @@ const (
 	StyleBraille     DigitStyle = "braille"
 	StyleBraille2x   DigitStyle = "braille_2x"
 	StyleBraille4x   DigitStyle = "braille_4x"
+	StyleBrailleThin2x DigitStyle = "braille_thin_2x"
+	StyleBrailleThin3x DigitStyle = "braille_thin_3x"
+	StyleBrailleThin4x DigitStyle = "braille_thin_4x"
 	StyleBox         DigitStyle = "box"
 	StyleBox2x       DigitStyle = "box_2x"
 	StyleHalfBlock   DigitStyle = "half_block"
@@ -90,6 +93,12 @@ func builtInClock(value string, styleName string, nerdFont bool, factor int) str
 		glyphs = makeBrailleGlyphs(2)
 	case StyleBraille4x:
 		glyphs = makeBrailleGlyphs(4)
+	case StyleBrailleThin2x:
+		glyphs = makeBrailleThinGlyphs(2)
+	case StyleBrailleThin3x:
+		glyphs = makeBrailleThinGlyphs(3)
+	case StyleBrailleThin4x:
+		glyphs = makeBrailleThinGlyphs(4)
 	case StyleBox:
 		if factor > 1 {
 			glyphs = boxGlyphs2x
@@ -455,6 +464,83 @@ func brailleDotMask(x, y int) int {
 	default:
 		return 0
 	}
+}
+
+func makeBrailleThinGlyphs(factor int) map[rune][]string {
+	if factor < 1 {
+		factor = 1
+	}
+
+	glyphs := make(map[rune][]string, len(brailleBitmaps))
+	for r, bitmap := range brailleBitmaps {
+		glyphs[r] = brailleFromBitmap(scaleBitmapThin(bitmap, factor))
+	}
+	return glyphs
+}
+
+func scaleBitmapThin(bitmap []string, factor int) []string {
+	if factor <= 1 {
+		return bitmap
+	}
+
+	height := len(bitmap)
+	width := 0
+	for _, row := range bitmap {
+		width = max(width, len(row))
+	}
+
+	newHeight := height * factor
+	newWidth := width * factor
+
+	out := make([][]byte, newHeight)
+	for i := range out {
+		out[i] = make([]byte, newWidth)
+		for j := range out[i] {
+			out[i][j] = '0'
+		}
+	}
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < len(bitmap[y]); x++ {
+			if bitmap[y][x] == '1' {
+				out[y*factor][x*factor] = '1'
+
+				// Connect horizontally
+				if x+1 < len(bitmap[y]) && bitmap[y][x+1] == '1' {
+					for i := 1; i < factor; i++ {
+						out[y*factor][x*factor+i] = '1'
+					}
+				}
+
+				// Connect vertically
+				if y+1 < height && x < len(bitmap[y+1]) && bitmap[y+1][x] == '1' {
+					for i := 1; i < factor; i++ {
+						out[y*factor+i][x*factor] = '1'
+					}
+				}
+
+				// Connect diagonally (down-left)
+				if y+1 < height && x-1 >= 0 && x-1 < len(bitmap[y+1]) && bitmap[y+1][x-1] == '1' {
+					for i := 1; i < factor; i++ {
+						out[y*factor+i][x*factor-i] = '1'
+					}
+				}
+
+				// Connect diagonally (down-right)
+				if y+1 < height && x+1 < len(bitmap[y+1]) && bitmap[y+1][x+1] == '1' {
+					for i := 1; i < factor; i++ {
+						out[y*factor+i][x*factor+i] = '1'
+					}
+				}
+			}
+		}
+	}
+
+	res := make([]string, newHeight)
+	for i := range out {
+		res[i] = string(out[i])
+	}
+	return res
 }
 
 var boxGlyphs = map[rune][]string{

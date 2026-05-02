@@ -129,6 +129,9 @@ func TestLargeDigitStyleVariants(t *testing.T) {
 		{style: "block_2x", rows: 10},
 		{style: "braille_2x", rows: 4},
 		{style: "braille_4x", rows: 7},
+		{style: "braille_thin_2x", rows: 4},
+		{style: "braille_thin_3x", rows: 6},
+		{style: "braille_thin_4x", rows: 7},
 		{style: "box_2x", rows: 10},
 		{style: "half_block_2x", rows: 10},
 	}
