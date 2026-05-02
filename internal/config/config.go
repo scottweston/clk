@@ -215,9 +215,12 @@ var DigitStyles = []string{
 	"braille",
 	"braille_2x",
 	"braille_thin_2x",
+	"braille_thin_cmf_2x",
 	"braille_thin_3x",
+	"braille_thin_cmf_3x",
 	"braille_4x",
 	"braille_thin_4x",
+	"braille_thin_cmf_4x",
 	"box",
 	"box_2x",
 	"half_block",
@@ -273,6 +276,8 @@ func doubleDigitStyle(style string) string {
 		return "braille_2x"
 	case "braille_thin_2x", "braille_thin_3x", "braille_thin_4x":
 		return "braille_thin_2x"
+	case "braille_thin_cmf_2x", "braille_thin_cmf_3x", "braille_thin_cmf_4x":
+		return "braille_thin_cmf_2x"
 	case "box", "box_2x":
 		return "box_2x"
 	case "half_block", "half_block_2x":

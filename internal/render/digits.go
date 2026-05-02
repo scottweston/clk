@@ -20,6 +20,9 @@ const (
 	StyleBrailleThin2x DigitStyle = "braille_thin_2x"
 	StyleBrailleThin3x DigitStyle = "braille_thin_3x"
 	StyleBrailleThin4x DigitStyle = "braille_thin_4x"
+	StyleBrailleThinCmf2x DigitStyle = "braille_thin_cmf_2x"
+	StyleBrailleThinCmf3x DigitStyle = "braille_thin_cmf_3x"
+	StyleBrailleThinCmf4x DigitStyle = "braille_thin_cmf_4x"
 	StyleBox         DigitStyle = "box"
 	StyleBox2x       DigitStyle = "box_2x"
 	StyleHalfBlock   DigitStyle = "half_block"
@@ -99,6 +102,12 @@ func builtInClock(value string, styleName string, nerdFont bool, factor int) str
 		glyphs = makeBrailleThinGlyphs(3)
 	case StyleBrailleThin4x:
 		glyphs = makeBrailleThinGlyphs(4)
+	case StyleBrailleThinCmf2x:
+		glyphs = makeBrailleThinCmfGlyphs(2)
+	case StyleBrailleThinCmf3x:
+		glyphs = makeBrailleThinCmfGlyphs(3)
+	case StyleBrailleThinCmf4x:
+		glyphs = makeBrailleThinCmfGlyphs(4)
 	case StyleBox:
 		if factor > 1 {
 			glyphs = boxGlyphs2x
@@ -527,6 +536,160 @@ func scaleBitmapThin(bitmap []string, factor int) []string {
 				}
 
 				// Connect diagonally (down-right)
+				if y+1 < height && x+1 < len(bitmap[y+1]) && bitmap[y+1][x+1] == '1' {
+					for i := 1; i < factor; i++ {
+						out[y*factor+i][x*factor+i] = '1'
+					}
+				}
+			}
+		}
+	}
+
+	res := make([]string, newHeight)
+	for i := range out {
+		res[i] = string(out[i])
+	}
+	return res
+}
+
+func makeBrailleThinCmfGlyphs(factor int) map[rune][]string {
+	if factor < 1 {
+		factor = 1
+	}
+
+	glyphs := make(map[rune][]string, len(brailleBitmaps))
+	for r, bitmap := range brailleBitmaps {
+		glyphs[r] = brailleFromBitmap(scaleBitmapThinCmf(bitmap, factor))
+	}
+	return glyphs
+}
+
+func scaleBitmapThinCmf(bitmap []string, factor int) []string {
+	if factor <= 1 {
+		return bitmap
+	}
+
+	height := len(bitmap)
+	width := 0
+	for _, row := range bitmap {
+		width = max(width, len(row))
+	}
+
+	newHeight := height * factor
+	newWidth := width * factor
+
+	out := make([][]byte, newHeight)
+	for i := range out {
+		out[i] = make([]byte, newWidth)
+		for j := range out[i] {
+			out[i][j] = '0'
+		}
+	}
+
+	isCorner := func(y, x int) bool {
+		if y < 0 || y >= height || x < 0 || x >= len(bitmap[y]) || bitmap[y][x] != '1' {
+			return false
+		}
+		hasN := y > 0 && x < len(bitmap[y-1]) && bitmap[y-1][x] == '1'
+		hasS := y+1 < height && x < len(bitmap[y+1]) && bitmap[y+1][x] == '1'
+		hasW := x > 0 && bitmap[y][x-1] == '1'
+		hasE := x+1 < len(bitmap[y]) && bitmap[y][x+1] == '1'
+
+		neighbors := 0
+		if hasN {
+			neighbors++
+		}
+		if hasS {
+			neighbors++
+		}
+		if hasW {
+			neighbors++
+		}
+		if hasE {
+			neighbors++
+		}
+
+		return neighbors == 2 && !((hasN && hasS) || (hasW && hasE))
+	}
+
+	skip := factor / 2
+	if skip < 1 {
+		skip = 1
+	}
+
+	for y := 0; y < height; y++ {
+		for x := 0; x < len(bitmap[y]); x++ {
+			if bitmap[y][x] == '1' {
+				corner := isCorner(y, x)
+				if !corner {
+					out[y*factor][x*factor] = '1'
+				}
+
+				hasN := y > 0 && x < len(bitmap[y-1]) && bitmap[y-1][x] == '1'
+				hasS := y+1 < height && x < len(bitmap[y+1]) && bitmap[y+1][x] == '1'
+				hasW := x > 0 && bitmap[y][x-1] == '1'
+				hasE := x+1 < len(bitmap[y]) && bitmap[y][x+1] == '1'
+
+				// Connect horizontally
+				if hasE {
+					start := 1
+					if corner {
+						start = skip
+					}
+					end := factor
+					if isCorner(y, x+1) {
+						end = factor - skip + 1
+					}
+					for i := start; i < end; i++ {
+						out[y*factor][x*factor+i] = '1'
+					}
+				}
+
+				// Connect vertically
+				if hasS {
+					start := 1
+					if corner {
+						start = skip
+					}
+					end := factor
+					if isCorner(y+1, x) {
+						end = factor - skip + 1
+					}
+					for i := start; i < end; i++ {
+						out[y*factor+i][x*factor] = '1'
+					}
+				}
+
+				// Add diagonal for corners
+				if corner {
+					if hasN && hasE {
+						for i := 0; i <= skip; i++ {
+							out[y*factor-skip+i][x*factor+i] = '1'
+						}
+					}
+					if hasN && hasW {
+						for i := 0; i <= skip; i++ {
+							out[y*factor-skip+i][x*factor-i] = '1'
+						}
+					}
+					if hasS && hasE {
+						for i := 0; i <= skip; i++ {
+							out[y*factor+skip-i][x*factor+i] = '1'
+						}
+					}
+					if hasS && hasW {
+						for i := 0; i <= skip; i++ {
+							out[y*factor+skip-i][x*factor-i] = '1'
+						}
+					}
+				}
+
+				// Connect diagonals (preserved as 1-pixel thin)
+				if y+1 < height && x-1 >= 0 && x-1 < len(bitmap[y+1]) && bitmap[y+1][x-1] == '1' {
+					for i := 1; i < factor; i++ {
+						out[y*factor+i][x*factor-i] = '1'
+					}
+				}
 				if y+1 < height && x+1 < len(bitmap[y+1]) && bitmap[y+1][x+1] == '1' {
 					for i := 1; i < factor; i++ {
 						out[y*factor+i][x*factor+i] = '1'
