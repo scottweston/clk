@@ -9,16 +9,17 @@ import (
 )
 
 type SecondsOptions struct {
-	Time       time.Time
-	Style      string
-	Width      int
-	NerdFont   bool
-	Background string
-	Accent     string
-	Foreground string
-	Muted      string
-	Progress   func(float64, int) string
-	Workday    WorkdayOptions
+	Time            time.Time
+	Style           string
+	Width           int
+	NerdFont        bool
+	Background      string
+	Accent          string
+	Foreground      string
+	Muted           string
+	Progress        func(float64, int) string
+	WorkdayProgress func(float64, int, ProgressDirection) string
+	Workday         WorkdayOptions
 }
 
 type WorkdayOptions struct {
@@ -26,6 +27,13 @@ type WorkdayOptions struct {
 	EndTime   string
 	Days      []string
 }
+
+type ProgressDirection string
+
+const (
+	ProgressDirectionUp   ProgressDirection = "up"
+	ProgressDirectionDown ProgressDirection = "down"
+)
 
 func Seconds(now time.Time, style string, width int, nerdFont bool) string {
 	return SecondsStyled(SecondsOptions{
@@ -59,7 +67,7 @@ func SecondsStyled(opts SecondsOptions) string {
 	case "pomodoro":
 		return pomodoro(now, opts.Width, opts.Progress)
 	case "workday":
-		return workday(now, opts.Width, opts.Progress, opts.Workday)
+		return workday(now, opts.Width, opts.Progress, opts.WorkdayProgress, opts.NerdFont, opts.Workday)
 	default:
 		return progressView(opts.Progress, progress, opts.Width)
 	}
@@ -95,6 +103,7 @@ type ProgressInfo struct {
 	Percent   float64
 	Label     string
 	Remaining time.Duration
+	Direction ProgressDirection
 }
 
 func PomodoroProgress(now time.Time) ProgressInfo {
@@ -129,7 +138,7 @@ func PomodoroProgress(now time.Time) ProgressInfo {
 	}
 }
 
-func workday(now time.Time, width int, progress func(float64, int) string, opts WorkdayOptions) string {
+func workday(now time.Time, width int, progress func(float64, int) string, directionalProgress func(float64, int, ProgressDirection) string, nerdFont bool, opts WorkdayOptions) string {
 	info := WorkdayProgress(now, opts)
 	remaining := fmt.Sprintf("%02d:%02d", int(info.Remaining.Hours()), int(info.Remaining.Minutes())%60)
 	label := fmt.Sprintf("%s %s", info.Label, remaining)
@@ -137,7 +146,11 @@ func workday(now time.Time, width int, progress func(float64, int) string, opts 
 	if barWidth < 1 {
 		barWidth = 1
 	}
-	bar := progressView(progress, info.Percent, normalizeBarWidth(barWidth))
+	barWidth = normalizeBarWidth(barWidth)
+	bar := progressView(progress, info.Percent, barWidth)
+	if nerdFont && directionalProgress != nil {
+		bar = directionalProgress(info.Percent, barWidth, info.Direction)
+	}
 	return label + " " + bar
 }
 
@@ -169,6 +182,7 @@ func WorkdayProgress(now time.Time, opts WorkdayOptions) ProgressInfo {
 			Percent:   float64(elapsed) / float64(total),
 			Label:     label,
 			Remaining: remaining,
+			Direction: ProgressDirectionUp,
 		}
 	}
 
@@ -192,6 +206,7 @@ func WorkdayProgress(now time.Time, opts WorkdayOptions) ProgressInfo {
 		Percent:   progress,
 		Label:     label,
 		Remaining: remaining,
+		Direction: ProgressDirectionDown,
 	}
 }
 

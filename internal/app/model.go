@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/lucasb-eyer/go-colorful"
 
 	"clk/internal/config"
 	"clk/internal/render"
@@ -309,15 +311,16 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 	}
 	secondsWidth := m.progressWidth(clockArt)
 	seconds := render.SecondsStyled(render.SecondsOptions{
-		Time:       now,
-		Style:      m.cfg.Display.SecondsStyle,
-		Width:      secondsWidth,
-		NerdFont:   m.cfg.UI.NerdFont,
-		Background: background,
-		Accent:     theme.Accent(theme.Lookup(m.cfg.Theme.Name), m.cfg.Theme.Accent),
-		Foreground: theme.Lookup(m.cfg.Theme.Name).Foreground,
-		Muted:      theme.Lookup(m.cfg.Theme.Name).Muted,
-		Progress:   m.progressView,
+		Time:            now,
+		Style:           m.cfg.Display.SecondsStyle,
+		Width:           secondsWidth,
+		NerdFont:        m.cfg.UI.NerdFont,
+		Background:      background,
+		Accent:          theme.Accent(theme.Lookup(m.cfg.Theme.Name), m.cfg.Theme.Accent),
+		Foreground:      theme.Lookup(m.cfg.Theme.Name).Foreground,
+		Muted:           theme.Lookup(m.cfg.Theme.Name).Muted,
+		Progress:        m.progressView,
+		WorkdayProgress: m.workdayProgressView,
 		Workday: render.WorkdayOptions{
 			StartTime: m.cfg.Workday.StartTime,
 			EndTime:   m.cfg.Workday.EndTime,
@@ -354,6 +357,81 @@ func (m Model) progressView(percent float64, width int) string {
 	return styleProgressEmptyCells(view, bar.EmptyColor, background)
 }
 
+func (m Model) workdayProgressView(percent float64, width int, direction render.ProgressDirection) string {
+	view := m.progressView(percent, width)
+	if direction != render.ProgressDirectionUp && direction != render.ProgressDirectionDown {
+		return view
+	}
+
+	bar := m.progress
+	bar.Width = width
+	barCells := progressBarCellCount(bar, percent)
+	filledCells := int(math.Round(clampPercent(percent) * float64(barCells)))
+	if filledCells <= 0 || filledCells >= barCells {
+		return view
+	}
+
+	emptyBackground := progressEmptyBackgroundColor(m.cfg)
+	boundaryColor := progressBoundaryColor(m.cfg, barCells, filledCells)
+	marker := workdayDirectionMarker(direction, boundaryColor, emptyBackground)
+	emptyCell := styledProgressEmptyCell(bar.EmptyColor, emptyBackground)
+	return strings.Replace(view, emptyCell, marker, 1)
+}
+
+func progressBarCellCount(bar progress.Model, percent float64) int {
+	percentView := bar.PercentageStyle.
+		Inline(true).
+		Render(fmt.Sprintf(bar.PercentFormat, clampPercent(percent)*100))
+	return max(0, bar.Width-lipgloss.Width(percentView))
+}
+
+func progressBoundaryColor(cfg config.Config, barCells, filledCells int) string {
+	palette := theme.Lookup(cfg.Theme.Name)
+	accent := theme.Accent(palette, cfg.Theme.Accent)
+	if barCells <= 1 {
+		return accent
+	}
+
+	start, err := colorful.Hex(accent)
+	if err != nil {
+		return accent
+	}
+	end, err := colorful.Hex(palette.Warning)
+	if err != nil {
+		return accent
+	}
+	position := float64(filledCells-1) / float64(barCells-1)
+	return start.BlendLuv(end, position).Hex()
+}
+
+func workdayDirectionMarker(direction render.ProgressDirection, boundaryColor, emptyBackground string) string {
+	style := lipgloss.NewStyle()
+	switch direction {
+	case render.ProgressDirectionUp:
+		return style.
+			Foreground(lipgloss.Color(boundaryColor)).
+			Background(lipgloss.Color(emptyBackground)).
+			Render("")
+	case render.ProgressDirectionDown:
+		return style.
+			Foreground(lipgloss.Color(emptyBackground)).
+			Background(lipgloss.Color(boundaryColor)).
+			Render("")
+	default:
+		return ""
+	}
+}
+
+func clampPercent(percent float64) float64 {
+	if percent < 0 {
+		return 0
+	}
+	if percent > 1 {
+		return 1
+	}
+	return percent
+}
+
 func progressEmptyBackgroundColor(cfg config.Config) string {
 	palette := theme.Lookup(cfg.Theme.Name)
 	switch cfg.Display.ProgressEmptyBackground {
@@ -371,12 +449,14 @@ func progressEmptyBackgroundColor(cfg config.Config) string {
 }
 
 func styleProgressEmptyCells(view, foreground, background string) string {
-	empty := string(progressEmptyCharacter)
-	styled := lipgloss.NewStyle().
+	return strings.ReplaceAll(view, string(progressEmptyCharacter), styledProgressEmptyCell(foreground, background))
+}
+
+func styledProgressEmptyCell(foreground, background string) string {
+	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color(foreground)).
 		Background(lipgloss.Color(background)).
-		Render(empty)
-	return strings.ReplaceAll(view, empty, styled)
+		Render(string(progressEmptyCharacter))
 }
 
 func (m Model) displayTime() time.Time {

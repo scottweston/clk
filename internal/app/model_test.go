@@ -357,6 +357,95 @@ func TestProgressViewStylesEmptyCellsWithConfiguredBackground(t *testing.T) {
 	}
 }
 
+func TestWorkdayProgressViewAddsNerdFontDirectionMarkers(t *testing.T) {
+	cfg := config.Default()
+	cfg.UI.NerdFont = true
+	m := New(cfg, config.NewManager("", true))
+
+	opts := render.SecondsOptions{
+		Style:           "workday",
+		Width:           48,
+		NerdFont:        true,
+		Progress:        m.progressView,
+		WorkdayProgress: m.workdayProgressView,
+		Workday: render.WorkdayOptions{
+			StartTime: "09:00",
+			EndTime:   "17:00",
+			Days:      []string{"mon", "tue", "wed", "thu", "fri"},
+		},
+	}
+
+	opts.Time = time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local)
+	if got := render.SecondsStyled(opts); !strings.Contains(got, "") || strings.Contains(got, "") {
+		t.Fatalf("expected mid-workday up marker, got %q", got)
+	}
+
+	opts.Time = time.Date(2026, 5, 1, 23, 0, 0, 0, time.Local)
+	if got := render.SecondsStyled(opts); !strings.Contains(got, "") || strings.Contains(got, "") {
+		t.Fatalf("expected after-workday down marker, got %q", got)
+	}
+}
+
+func TestWorkdayProgressViewKeepsStableWidth(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+
+	plain := m.progressView(0.5, 48)
+	up := m.workdayProgressView(0.5, 48, render.ProgressDirectionUp)
+	down := m.workdayProgressView(0.5, 48, render.ProgressDirectionDown)
+
+	if lipgloss.Width(up) != lipgloss.Width(plain) {
+		t.Fatalf("expected up marker width %d, got %d in %q", lipgloss.Width(plain), lipgloss.Width(up), up)
+	}
+	if lipgloss.Width(down) != lipgloss.Width(plain) {
+		t.Fatalf("expected down marker width %d, got %d in %q", lipgloss.Width(plain), lipgloss.Width(down), down)
+	}
+}
+
+func TestWorkdayProgressViewFallsBackWithoutNerdFont(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	opts := render.SecondsOptions{
+		Style:           "workday",
+		Width:           48,
+		NerdFont:        false,
+		Progress:        m.progressView,
+		WorkdayProgress: m.workdayProgressView,
+		Workday: render.WorkdayOptions{
+			StartTime: "09:00",
+			EndTime:   "17:00",
+			Days:      []string{"mon", "tue", "wed", "thu", "fri"},
+		},
+		Time: time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local),
+	}
+
+	if got := render.SecondsStyled(opts); strings.Contains(got, "") || strings.Contains(got, "") {
+		t.Fatalf("expected no powerline marker without Nerd Font, got %q", got)
+	}
+}
+
+func TestWorkdayProgressViewOmitsMarkersAtEdges(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+
+	cases := []struct {
+		percent   float64
+		direction render.ProgressDirection
+	}{
+		{0, render.ProgressDirectionUp},
+		{0, render.ProgressDirectionDown},
+		{1, render.ProgressDirectionUp},
+		{1, render.ProgressDirectionDown},
+	}
+
+	for _, tc := range cases {
+		got := m.workdayProgressView(tc.percent, 48, tc.direction)
+		if strings.Contains(got, "") || strings.Contains(got, "") {
+			t.Fatalf("expected no edge marker for %v %s, got %q", tc.percent, tc.direction, got)
+		}
+		if lipgloss.Width(got) != lipgloss.Width(m.progressView(tc.percent, 48)) {
+			t.Fatalf("expected edge marker width to remain stable, got %q", got)
+		}
+	}
+}
+
 func TestProgressWidthUsesClockWidthAsMinimum(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
 	m.width = 20
