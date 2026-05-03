@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,8 @@ type Model struct {
 }
 
 type tickMsg time.Time
+
+const progressEmptyCharacter = '⣿'
 
 func New(cfg config.Config, manager config.Manager) Model {
 	cfg.Normalize()
@@ -250,12 +253,32 @@ func newProgressModel(cfg config.Config) progress.Model {
 	accent := theme.Accent(palette, cfg.Theme.Accent)
 	bar := progress.New(
 		progress.WithGradient(accent, palette.Warning),
+		progress.WithFillCharacters('█', progressEmptyCharacter),
 	)
-	bar.EmptyColor = palette.Background
+	bar.EmptyColor = halfBrightnessHex(accent)
 	bar.PercentageStyle = lipgloss.NewStyle().
 		Foreground(lipgloss.Color(palette.Foreground)).
 		Background(lipgloss.Color(palette.Background))
 	return bar
+}
+
+func halfBrightnessHex(color string) string {
+	if len(color) != 7 || color[0] != '#' {
+		return color
+	}
+	r, err := strconv.ParseUint(color[1:3], 16, 8)
+	if err != nil {
+		return color
+	}
+	g, err := strconv.ParseUint(color[3:5], 16, 8)
+	if err != nil {
+		return color
+	}
+	b, err := strconv.ParseUint(color[5:7], 16, 8)
+	if err != nil {
+		return color
+	}
+	return fmt.Sprintf("#%02x%02x%02x", r/2, g/2, b/2)
 }
 
 func (m *Model) updateProgressColors() {
@@ -264,16 +287,7 @@ func (m *Model) updateProgressColors() {
 	}
 	m.themeName = m.cfg.Theme.Name
 	m.accentName = m.cfg.Theme.Accent
-	palette := theme.Lookup(m.cfg.Theme.Name)
-	accent := theme.Accent(palette, m.cfg.Theme.Accent)
-	bar := progress.New(
-		progress.WithGradient(accent, palette.Warning),
-	)
-	bar.EmptyColor = palette.Background
-	bar.PercentageStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color(palette.Foreground)).
-		Background(lipgloss.Color(palette.Background))
-	m.progress = bar
+	m.progress = newProgressModel(m.cfg)
 }
 
 func (m Model) clockView(styles theme.Stylesheet, background string) string {
@@ -333,7 +347,36 @@ func (m Model) progressWidth(clockArt string) int {
 func (m Model) progressView(percent float64, width int) string {
 	bar := m.progress
 	bar.Width = width
-	return bar.ViewAs(percent)
+	background := progressEmptyBackgroundColor(m.cfg)
+	view := lipgloss.NewStyle().
+		Background(lipgloss.Color(background)).
+		Render(bar.ViewAs(percent))
+	return styleProgressEmptyCells(view, bar.EmptyColor, background)
+}
+
+func progressEmptyBackgroundColor(cfg config.Config) string {
+	palette := theme.Lookup(cfg.Theme.Name)
+	switch cfg.Display.ProgressEmptyBackground {
+	case "accent":
+		return theme.Accent(palette, cfg.Theme.Accent)
+	case "muted":
+		return palette.Muted
+	case "foreground":
+		return palette.Foreground
+	case "warning":
+		return palette.Warning
+	default:
+		return palette.Background
+	}
+}
+
+func styleProgressEmptyCells(view, foreground, background string) string {
+	empty := string(progressEmptyCharacter)
+	styled := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(foreground)).
+		Background(lipgloss.Color(background)).
+		Render(empty)
+	return strings.ReplaceAll(view, empty, styled)
 }
 
 func (m Model) displayTime() time.Time {
@@ -589,6 +632,7 @@ func (m Model) settingItems() []settingItem {
 		toggleItem("Blink sep", func(c config.Config) bool { return c.Display.BlinkSeparator }, func(v bool, c *config.Config) { c.Display.BlinkSeparator = v }),
 		toggleItem("Inline sec", func(c config.Config) bool { return c.Display.InlineSeconds }, func(v bool, c *config.Config) { c.Display.InlineSeconds = v }),
 		cycleItem("Seconds", func(c config.Config) string { return c.Display.SecondsStyle }, func(v string, c *config.Config) { c.Display.SecondsStyle = v }, config.SecondsStyles),
+		cycleItem("Bar bg", func(c config.Config) string { return c.Display.ProgressEmptyBackground }, func(v string, c *config.Config) { c.Display.ProgressEmptyBackground = v }, config.ProgressEmptyBackgrounds),
 		cycleItem("Work start", func(c config.Config) string { return c.Workday.StartTime }, func(v string, c *config.Config) { c.Workday.StartTime = v }, config.TimeChoices),
 		cycleItem("Work end", func(c config.Config) string { return c.Workday.EndTime }, func(v string, c *config.Config) { c.Workday.EndTime = v }, config.TimeChoices),
 		submenuItem("Work days", func(c config.Config) string { return strings.Join(c.Workday.Days, ",") }, "workdays"),

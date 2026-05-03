@@ -16,6 +16,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Display.SecondsStyle != "progress_bar" {
 		t.Fatalf("expected progress bar seconds, got %q", cfg.Display.SecondsStyle)
 	}
+	if cfg.Display.ProgressEmptyBackground != "theme" {
+		t.Fatalf("expected theme progress empty background, got %q", cfg.Display.ProgressEmptyBackground)
+	}
 	if cfg.Workday.StartTime != "09:00" || cfg.Workday.EndTime != "17:00" {
 		t.Fatalf("expected default workday 09:00-17:00, got %+v", cfg.Workday)
 	}
@@ -54,12 +57,12 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 func TestNormalizeInvalidValues(t *testing.T) {
 	cfg := Config{
 		Time:    TimeConfig{Format: "bad"},
-		Display: DisplayConfig{DigitStyle: "bad", FigletFont: "bad", ToiletFont: "bad", SecondsStyle: "bad", Alignment: "bad", Size: "bad"},
+		Display: DisplayConfig{DigitStyle: "bad", FigletFont: "bad", ToiletFont: "bad", SecondsStyle: "bad", ProgressEmptyBackground: "bad", Alignment: "bad", Size: "bad"},
 		Workday: WorkdayConfig{StartTime: "bad", EndTime: "bad", Days: []string{"wat"}},
 		Theme:   ThemeConfig{Accent: "bad"},
 	}
 	cfg.Normalize()
-	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.Size != "" {
+	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.ProgressEmptyBackground != "theme" || cfg.Display.Size != "" {
 		t.Fatalf("invalid values were not normalized: %+v", cfg)
 	}
 	if cfg.Workday.StartTime != "09:00" || cfg.Workday.EndTime != "17:00" || strings.Join(cfg.Workday.Days, ",") != "mon,tue,wed,thu,fri" {

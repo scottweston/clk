@@ -31,14 +31,15 @@ type TimeConfig struct {
 }
 
 type DisplayConfig struct {
-	DigitStyle     string `yaml:"digit_style"`
-	FigletFont     string `yaml:"figlet_font"`
-	ToiletFont     string `yaml:"toilet_font"`
-	SecondsStyle   string `yaml:"seconds_style"`
-	InlineSeconds  bool   `yaml:"inline_seconds"`
-	Alignment      string `yaml:"alignment"`
-	Size           string `yaml:"size,omitempty"`
-	BlinkSeparator bool   `yaml:"blink_separator"`
+	DigitStyle              string `yaml:"digit_style"`
+	FigletFont              string `yaml:"figlet_font"`
+	ToiletFont              string `yaml:"toilet_font"`
+	SecondsStyle            string `yaml:"seconds_style"`
+	InlineSeconds           bool   `yaml:"inline_seconds"`
+	ProgressEmptyBackground string `yaml:"progress_empty_background"`
+	Alignment               string `yaml:"alignment"`
+	Size                    string `yaml:"size,omitempty"`
+	BlinkSeparator          bool   `yaml:"blink_separator"`
 }
 
 type WorkdayConfig struct {
@@ -74,13 +75,14 @@ func Default() Config {
 			Timezone: "Local",
 		},
 		Display: DisplayConfig{
-			DigitStyle:     "block",
-			FigletFont:     "standard",
-			ToiletFont:     "standard",
-			SecondsStyle:   "progress_bar",
-			InlineSeconds:  false,
-			Alignment:      "center",
-			BlinkSeparator: false,
+			DigitStyle:              "block",
+			FigletFont:              "standard",
+			ToiletFont:              "standard",
+			SecondsStyle:            "progress_bar",
+			InlineSeconds:           false,
+			ProgressEmptyBackground: "theme",
+			Alignment:               "center",
+			BlinkSeparator:          false,
 		},
 		Workday: WorkdayConfig{
 			StartTime: "09:00",
@@ -189,6 +191,9 @@ func (c *Config) Normalize() {
 	if !contains(SecondsStyles, c.Display.SecondsStyle) {
 		c.Display.SecondsStyle = "progress_bar"
 	}
+	if !contains(ProgressEmptyBackgrounds, c.Display.ProgressEmptyBackground) {
+		c.Display.ProgressEmptyBackground = "theme"
+	}
 	if !contains(Alignments, c.Display.Alignment) {
 		c.Display.Alignment = "center"
 	}
@@ -241,6 +246,8 @@ var SecondsStyles = []string{
 	"pomodoro",
 	"workday",
 }
+
+var ProgressEmptyBackgrounds = []string{"theme", "accent", "muted", "foreground", "warning"}
 
 var Alignments = []string{"left", "center", "right"}
 

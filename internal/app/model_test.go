@@ -59,6 +59,23 @@ func TestWorkdaySettingsChangeNoConfig(t *testing.T) {
 	}
 }
 
+func TestProgressBackgroundSettingsChangeNoConfig(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.settings = true
+	m.cursor = settingIndex(m, "Bar bg")
+
+	m.changeSetting(1)
+	if m.cfg.Display.ProgressEmptyBackground != "accent" {
+		t.Fatalf("expected progress empty background to change to accent, got %q", m.cfg.Display.ProgressEmptyBackground)
+	}
+	if got := progressEmptyBackgroundColor(m.cfg); got != theme.Accent(theme.Lookup(m.cfg.Theme.Name), m.cfg.Theme.Accent) {
+		t.Fatalf("expected accent progress empty background color, got %q", got)
+	}
+	if m.saveError != "" {
+		t.Fatalf("unexpected save error: %s", m.saveError)
+	}
+}
+
 func TestSettingsDoNotExposeClockSize(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
 	for _, item := range m.settingItems() {
@@ -306,6 +323,37 @@ func TestBubbleProgressStylesUseCurrentTime(t *testing.T) {
 		if out := m.View(); !strings.Contains(out, tc.want) {
 			t.Fatalf("expected %s to render %s from current time, got %q", tc.style, tc.want, out)
 		}
+	}
+}
+
+func TestProgressRemainingFillUsesDimmedAccentBlock(t *testing.T) {
+	cfg := config.Default()
+	cfg.Theme.Name = "tokyo-night"
+	cfg.Theme.Accent = "cyan"
+
+	m := New(cfg, config.NewManager("", true))
+	if m.progress.Empty != progressEmptyCharacter {
+		t.Fatalf("expected remaining progress character %q, got %q", progressEmptyCharacter, m.progress.Empty)
+	}
+	if m.progress.EmptyColor != "#3e677f" {
+		t.Fatalf("expected half-brightness cyan empty color, got %q", m.progress.EmptyColor)
+	}
+}
+
+func TestProgressViewStylesEmptyCellsWithConfiguredBackground(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.ProgressEmptyBackground = "warning"
+	m := New(cfg, config.NewManager("", true))
+
+	background := progressEmptyBackgroundColor(cfg)
+	want := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(m.progress.EmptyColor)).
+		Background(lipgloss.Color(background)).
+		Render(string(progressEmptyCharacter))
+
+	out := m.progressView(0, 12)
+	if !strings.Contains(out, want) {
+		t.Fatalf("expected empty progress cells to include configured background style %q, got %q", want, out)
 	}
 }
 
