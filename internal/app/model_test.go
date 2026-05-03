@@ -401,6 +401,28 @@ func TestWorkdayProgressViewKeepsStableWidth(t *testing.T) {
 	}
 }
 
+func TestWorkdayProgressViewPlacesDownMarkerAtLeftEdge(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+
+	up := m.workdayProgressView(0.5, 48, render.ProgressDirectionUp)
+	down := m.workdayProgressView(0.5, 48, render.ProgressDirectionDown)
+
+	upMarker := strings.Index(up, "")
+	upFirstFill := strings.Index(up, string(m.progress.Full))
+	if upMarker <= upFirstFill {
+		t.Fatalf("expected up marker after filled cells, got %q", up)
+	}
+
+	downMarker := strings.Index(down, "")
+	downNextFill := strings.Index(down, string(m.progress.Full))
+	if downMarker < 0 {
+		t.Fatalf("expected down marker, got %q", down)
+	}
+	if downNextFill >= 0 && downMarker >= downNextFill {
+		t.Fatalf("expected down marker at the left edge before filled cells, got %q", down)
+	}
+}
+
 func TestWorkdayProgressViewFallsBackWithoutNerdFont(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
 	opts := render.SecondsOptions{

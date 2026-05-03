@@ -372,8 +372,15 @@ func (m Model) workdayProgressView(percent float64, width int, direction render.
 	}
 
 	emptyBackground := progressEmptyBackgroundColor(m.cfg)
-	boundaryColor := progressBoundaryColor(m.cfg, barCells, filledCells)
+	boundaryCell := filledCells - 1
+	if direction == render.ProgressDirectionDown {
+		boundaryCell = 0
+	}
+	boundaryColor := progressFillColor(m.cfg, barCells, boundaryCell)
 	marker := workdayDirectionMarker(direction, boundaryColor, emptyBackground)
+	if direction == render.ProgressDirectionDown {
+		return strings.Replace(view, string(bar.Full), marker, 1)
+	}
 	emptyCell := styledProgressEmptyCell(bar.EmptyColor, emptyBackground)
 	return strings.Replace(view, emptyCell, marker, 1)
 }
@@ -385,7 +392,7 @@ func progressBarCellCount(bar progress.Model, percent float64) int {
 	return max(0, bar.Width-lipgloss.Width(percentView))
 }
 
-func progressBoundaryColor(cfg config.Config, barCells, filledCells int) string {
+func progressFillColor(cfg config.Config, barCells, cell int) string {
 	palette := theme.Lookup(cfg.Theme.Name)
 	accent := theme.Accent(palette, cfg.Theme.Accent)
 	if barCells <= 1 {
@@ -400,7 +407,7 @@ func progressBoundaryColor(cfg config.Config, barCells, filledCells int) string 
 	if err != nil {
 		return accent
 	}
-	position := float64(filledCells-1) / float64(barCells-1)
+	position := float64(cell) / float64(barCells-1)
 	return start.BlendLuv(end, position).Hex()
 }
 
@@ -414,8 +421,8 @@ func workdayDirectionMarker(direction render.ProgressDirection, boundaryColor, e
 			Render("")
 	case render.ProgressDirectionDown:
 		return style.
-			Foreground(lipgloss.Color(emptyBackground)).
-			Background(lipgloss.Color(boundaryColor)).
+			Foreground(lipgloss.Color(boundaryColor)).
+			Background(lipgloss.Color(emptyBackground)).
 			Render("")
 	default:
 		return ""
