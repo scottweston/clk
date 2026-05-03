@@ -64,10 +64,16 @@ Normalization is intentionally conservative. Unknown enum values fall back to de
 
 ## Testing
 
-Use the temp Go caches used during development:
+Use Go's default build and module caches:
 
 ```sh
-GOCACHE=/tmp/senpai-go-build GOMODCACHE=/tmp/senpai-go-mod go test ./...
+go test ./...
+```
+
+If the default Go caches are not writable in a sandboxed environment, use project-specific temp caches:
+
+```sh
+GOCACHE=/tmp/clk-go-build GOMODCACHE=/tmp/clk-go-mod go test ./...
 ```
 
 Tests cover config normalization/migration, renderer output, width stability for blinking separators, settings/model behavior, theme fallbacks, and optional external font behavior. Tests that require `toilet` skip when it is not available.
