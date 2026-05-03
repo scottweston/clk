@@ -140,7 +140,7 @@ func PomodoroProgress(now time.Time) ProgressInfo {
 
 func workday(now time.Time, width int, progress func(float64, int) string, directionalProgress func(float64, int, ProgressDirection) string, nerdFont bool, opts WorkdayOptions) string {
 	info := WorkdayProgress(now, opts)
-	remaining := fmt.Sprintf("%02d:%02d", int(info.Remaining.Hours()), int(info.Remaining.Minutes())%60)
+	remaining := formatHoursMinutesCeil(info.Remaining)
 	label := fmt.Sprintf("%s %s", info.Label, remaining)
 	barWidth := width - utf8.RuneCountInString(label) - 2
 	if barWidth < 1 {
@@ -152,6 +152,14 @@ func workday(now time.Time, width int, progress func(float64, int) string, direc
 		bar = directionalProgress(info.Percent, barWidth, info.Direction)
 	}
 	return label + " " + bar
+}
+
+func formatHoursMinutesCeil(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	minutes := int(math.Ceil(float64(d) / float64(time.Minute)))
+	return fmt.Sprintf("%02d:%02d", minutes/60, minutes%60)
 }
 
 func WorkdayProgress(now time.Time, opts WorkdayOptions) ProgressInfo {

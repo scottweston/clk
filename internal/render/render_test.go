@@ -274,6 +274,13 @@ func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
 		t.Fatalf("expected mid-workday with bar, got %q", got)
 	}
 
+	opts.Time = time.Date(2026, 5, 1, 9, 8, 30, 0, time.Local)
+	opts.Workday.EndTime = "18:00"
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 08:52") {
+		t.Fatalf("expected partial remaining minute to round up, got %q", got)
+	}
+	opts.Workday.EndTime = "17:00"
+
 	opts.Time = time.Date(2026, 5, 1, 18, 0, 0, 0, time.Local)
 	if got := SecondsStyled(opts); !strings.Contains(got, "workday 63:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
 		t.Fatalf("expected after-workday bar to drain toward next start, got %q", got)
