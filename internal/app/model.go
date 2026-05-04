@@ -50,6 +50,11 @@ type tickMsg time.Time
 
 const progressEmptyCharacter = '⣿'
 
+const (
+	settingsMinVisibleOptions = 3
+	settingsPanelChromeRows   = 6
+)
+
 func New(cfg config.Config, manager config.Manager) Model {
 	cfg.Normalize()
 	return Model{
@@ -479,10 +484,7 @@ func (m Model) displayTime() time.Time {
 }
 
 func (m *Model) adjustScroll(total int) {
-	maxVisible := (m.height + 2) / 3
-	if maxVisible < 1 {
-		maxVisible = 1
-	}
+	maxVisible := settingsVisibleOptions(m.height, total, 3)
 	if m.cursor < m.scrollOffset {
 		m.scrollOffset = m.cursor
 	}
@@ -501,10 +503,7 @@ func (m *Model) adjustScroll(total int) {
 }
 
 func (m *Model) adjustDayScroll() {
-	maxVisible := (m.height + 2) / 3
-	if maxVisible < 1 {
-		maxVisible = 1
-	}
+	maxVisible := settingsVisibleOptions(m.height, len(config.WorkdayNames), 3)
 	if m.dayCursor < m.dayScrollOffset {
 		m.dayScrollOffset = m.dayCursor
 	}
@@ -532,10 +531,7 @@ func (m *Model) adjustFontScroll() {
 	if m.fontCursor >= len(choices) {
 		m.fontCursor = len(choices) - 1
 	}
-	maxVisible := (m.height + 2) / 3
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := settingsVisibleOptions(m.height, len(choices), 4)
 	if m.fontCursor < m.fontScrollOffset {
 		m.fontScrollOffset = m.fontCursor
 	}
@@ -587,10 +583,7 @@ func (m Model) settingsView(styles theme.Stylesheet) string {
 	}
 
 	items := m.settingItems()
-	maxVisible := (m.height + 2) / 3
-	if maxVisible < 1 {
-		maxVisible = 1
-	}
+	maxVisible := settingsVisibleOptions(m.height, len(items), 3)
 	start := m.scrollOffset
 	end := start + maxVisible
 	if end > len(items) {
@@ -619,10 +612,7 @@ func (m Model) settingsView(styles theme.Stylesheet) string {
 
 func (m Model) fontPickerView(styles theme.Stylesheet) string {
 	choices := m.filteredFontChoices()
-	maxVisible := (m.height + 2) / 3
-	if maxVisible < 3 {
-		maxVisible = 3
-	}
+	maxVisible := settingsVisibleOptions(m.height, len(choices), 4)
 	start := m.fontScrollOffset
 	end := start + maxVisible
 	if end > len(choices) {
@@ -660,10 +650,7 @@ func (m Model) fontPickerView(styles theme.Stylesheet) string {
 }
 
 func (m Model) workdaysView(styles theme.Stylesheet) string {
-	maxVisible := (m.height + 2) / 3
-	if maxVisible < 1 {
-		maxVisible = 1
-	}
+	maxVisible := settingsVisibleOptions(m.height, len(config.WorkdayNames), 3)
 	start := m.dayScrollOffset
 	end := start + maxVisible
 	if end > len(config.WorkdayNames) {
@@ -692,6 +679,18 @@ func (m Model) workdaysView(styles theme.Stylesheet) string {
 	}
 	rows = append(rows, "", styles.Muted.Render("enter/space toggles • esc returns • autosaves"))
 	return styles.Panel.Render(strings.Join(rows, "\n"))
+}
+
+func settingsVisibleOptions(height, totalOptions, fixedContentRows int) int {
+	targetHeight := height / 2
+	available := targetHeight - settingsPanelChromeRows - fixedContentRows
+	if available < settingsMinVisibleOptions {
+		return settingsMinVisibleOptions
+	}
+	if totalOptions > available && available > settingsMinVisibleOptions {
+		return available - 1
+	}
+	return available
 }
 
 type settingItem struct {

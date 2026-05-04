@@ -140,13 +140,13 @@ func TestFontPickerFiltersAndSelectsFont(t *testing.T) {
 		t.Fatalf("expected query slant, got %q", updated.fontQuery)
 	}
 	choices := updated.filteredFontChoices()
-	if len(choices) == 0 || choices[0] != "slant" {
+	if len(choices) == 0 || strings.ToLower(fontChoiceLabel(choices[0])) != "slant" {
 		t.Fatalf("expected slant match, got %+v", choices)
 	}
 
 	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	updated = next.(Model)
-	if updated.cfg.Display.FigletFont != "slant" {
+	if strings.ToLower(fontChoiceLabel(updated.cfg.Display.FigletFont)) != "slant" {
 		t.Fatalf("expected selected figlet font slant, got %q", updated.cfg.Display.FigletFont)
 	}
 	if updated.fontPicker {
@@ -171,9 +171,33 @@ func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
 		t.Fatal("expected workdays submenu to open")
 	}
 
+	m.dayCursor = 5
+	m.adjustDayScroll()
 	out := m.settingsView(testStyles())
-	if !strings.Contains(out, "[x] Monday") || !strings.Contains(out, "[ ] Saturday") {
+	if !strings.Contains(out, "[x] Tuesday") || !strings.Contains(out, "[ ] Saturday") {
 		t.Fatalf("expected checkbox workday rows, got %q", out)
+	}
+}
+
+func TestSettingsViewUsesAtMostHalfHeightWhenPossible(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.height = 30
+
+	out := m.settingsView(testStyles())
+	if got, want := lipgloss.Height(out), m.height/2; got > want {
+		t.Fatalf("expected settings view height <= %d, got %d in %q", want, got, out)
+	}
+}
+
+func TestSettingsViewShowsAtLeastThreeOptions(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.height = 10
+
+	out := m.settingsView(testStyles())
+	for _, label := range []string{"Theme", "Accent", "Time format"} {
+		if !strings.Contains(out, label) {
+			t.Fatalf("expected small settings view to include %q, got %q", label, out)
+		}
 	}
 }
 
