@@ -17,6 +17,8 @@ var (
 	figletFonts     []string
 	toiletFontsOnce sync.Once
 	toiletFonts     []string
+	fclkFontsOnce   sync.Once
+	fclkFonts       []string
 )
 
 var fallbackFigletFonts = []string{"standard", "big", "block", "bubble", "digital", "mini", "script", "slant", "small"}
@@ -47,6 +49,13 @@ func ToiletFontChoices() []string {
 		})
 	})
 	return append([]string(nil), toiletFonts...)
+}
+
+func FclkFontChoices() []string {
+	fclkFontsOnce.Do(func() {
+		fclkFonts = discoverFclkFonts()
+	})
+	return append([]string(nil), fclkFonts...)
 }
 
 type fontDiscovery struct {
@@ -232,4 +241,36 @@ func collectFonts(root string, extensions []string, pathValues bool, choices map
 		}
 		return nil
 	})
+}
+
+func discoverFclkFonts() []string {
+	choices := make(map[string]bool)
+	for _, dir := range uniqueDirs(fclkFontDirs(), nil) {
+		collectFonts(dir, []string{".fclk"}, true, choices)
+	}
+
+	out := make([]string, 0, len(choices))
+	for choice := range choices {
+		out = append(out, choice)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(fontChoiceBase(out[i])) < strings.ToLower(fontChoiceBase(out[j]))
+	})
+	return out
+}
+
+func fclkFontDirs() []string {
+	var dirs []string
+	if base, err := os.UserConfigDir(); err == nil {
+		dirs = append(dirs, filepath.Join(base, AppDir, "fonts"))
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		dirs = append(dirs, cwd)
+	}
+	return dirs
+}
+
+func fontChoiceBase(choice string) string {
+	base := filepath.Base(choice)
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }

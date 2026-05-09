@@ -1,6 +1,7 @@
 package render
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -173,6 +174,49 @@ func TestExternalFontArgsUseDirectoryForFontPaths(t *testing.T) {
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("external font args = %#v, want %#v", got, want)
 	}
+}
+
+func TestFclkClockRendersUserFont(t *testing.T) {
+	font := writeTestFclkFont(t)
+	out := ClockStyled(ClockOptions{
+		Value:    "10:01",
+		Style:    "fclk",
+		FclkFont: font,
+	})
+	if !strings.Contains(out, "one") || !strings.Contains(out, "zero") || !strings.Contains(out, "co") {
+		t.Fatalf("expected fclk glyphs, got %q", out)
+	}
+}
+
+func TestHiddenSeparatorKeepsFclkClockWidthStable(t *testing.T) {
+	font := writeTestFclkFont(t)
+	visible := ClockStyled(ClockOptions{
+		Value:    "10:01",
+		Style:    "fclk",
+		FclkFont: font,
+	})
+	hidden := ClockStyled(ClockOptions{
+		Value:    "10" + string(HiddenSeparator) + "01",
+		Style:    "fclk",
+		FclkFont: font,
+	})
+
+	assertSameLineWidths(t, visible, hidden)
+}
+
+func writeTestFclkFont(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "test.fclk")
+	data := strings.Join([]string{
+		":: 0000 1111",
+		"co zero one!",
+		"lo zero one!",
+		"on zero one!",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write fclk font: %v", err)
+	}
+	return strings.TrimSuffix(path, filepath.Ext(path))
 }
 
 func TestHiddenSeparatorKeepsBrailleClockWidthStable(t *testing.T) {

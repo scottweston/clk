@@ -90,10 +90,12 @@ func TestSettingsOnlyExposeRelevantExternalFontSelector(t *testing.T) {
 		style      string
 		wantFiglet bool
 		wantToilet bool
+		wantFclk   bool
 	}{
 		{style: "block"},
 		{style: "figlet", wantFiglet: true},
 		{style: "toilet", wantToilet: true},
+		{style: "fclk", wantFclk: true},
 	}
 	for _, tc := range cases {
 		cfg := config.Default()
@@ -102,8 +104,9 @@ func TestSettingsOnlyExposeRelevantExternalFontSelector(t *testing.T) {
 
 		gotFiglet := hasSettingItem(m, "Figlet font")
 		gotToilet := hasSettingItem(m, "Toilet font")
-		if gotFiglet != tc.wantFiglet || gotToilet != tc.wantToilet {
-			t.Fatalf("%s settings figlet=%v toilet=%v, want figlet=%v toilet=%v", tc.style, gotFiglet, gotToilet, tc.wantFiglet, tc.wantToilet)
+		gotFclk := hasSettingItem(m, "FCLK font")
+		if gotFiglet != tc.wantFiglet || gotToilet != tc.wantToilet || gotFclk != tc.wantFclk {
+			t.Fatalf("%s settings figlet=%v toilet=%v fclk=%v, want figlet=%v toilet=%v fclk=%v", tc.style, gotFiglet, gotToilet, gotFclk, tc.wantFiglet, tc.wantToilet, tc.wantFclk)
 		}
 	}
 }

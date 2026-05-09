@@ -57,12 +57,12 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 func TestNormalizeInvalidValues(t *testing.T) {
 	cfg := Config{
 		Time:    TimeConfig{Format: "bad"},
-		Display: DisplayConfig{DigitStyle: "bad", FigletFont: "bad", ToiletFont: "bad", SecondsStyle: "bad", ProgressEmptyBackground: "bad", Alignment: "bad", Size: "bad"},
+		Display: DisplayConfig{DigitStyle: "bad", FigletFont: "bad", ToiletFont: "bad", FclkFont: "bad", SecondsStyle: "bad", ProgressEmptyBackground: "bad", Alignment: "bad", Size: "bad"},
 		Workday: WorkdayConfig{StartTime: "bad", EndTime: "bad", Days: []string{"wat"}},
 		Theme:   ThemeConfig{Accent: "bad"},
 	}
 	cfg.Normalize()
-	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.ProgressEmptyBackground != "theme" || cfg.Display.Size != "" {
+	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.FclkFont != "" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.ProgressEmptyBackground != "theme" || cfg.Display.Size != "" {
 		t.Fatalf("invalid values were not normalized: %+v", cfg)
 	}
 	if cfg.Workday.StartTime != "09:00" || cfg.Workday.EndTime != "17:00" || strings.Join(cfg.Workday.Days, ",") != "mon,tue,wed,thu,fri" {
@@ -76,6 +76,7 @@ func TestNormalizeMigratesDoubleSizeToDigitStyle(t *testing.T) {
 		"braille":    "braille_2x",
 		"box":        "box_2x",
 		"half_block": "half_block_2x",
+		"fclk":       "fclk",
 		"figlet":     "figlet",
 		"toilet":     "toilet",
 	}
@@ -136,6 +137,77 @@ func TestNormalizeAcceptsDiscoveredUserFigletFont(t *testing.T) {
 	}
 }
 
+func TestFclkFontChoicesIncludeConfigFonts(t *testing.T) {
+	resetFclkFontCache()
+	t.Cleanup(resetFclkFontCache)
+
+	xdgConfig := t.TempDir()
+	fontPath := filepath.Join(xdgConfig, "clk", "fonts", "custom-clock.fclk")
+	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
+		t.Fatalf("create font dir: %v", err)
+	}
+	if err := os.WriteFile(fontPath, []byte("0\nX\n"), 0o600); err != nil {
+		t.Fatalf("write font: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+
+	want := strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
+	if !contains(FclkFontChoices(), want) {
+		t.Fatalf("expected discovered fclk font %q in choices", want)
+	}
+}
+
+func TestFclkFontChoicesIncludeCurrentDirectoryFonts(t *testing.T) {
+	resetFclkFontCache()
+	t.Cleanup(resetFclkFontCache)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	dir := t.TempDir()
+	fontPath := filepath.Join(dir, "local-clock.fclk")
+	if err := os.WriteFile(fontPath, []byte("0\nX\n"), 0o600); err != nil {
+		t.Fatalf("write font: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	want := strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
+	if !contains(FclkFontChoices(), want) {
+		t.Fatalf("expected current directory fclk font %q in choices", want)
+	}
+}
+
+func TestNormalizeAcceptsDiscoveredFclkFont(t *testing.T) {
+	resetFclkFontCache()
+	t.Cleanup(resetFclkFontCache)
+
+	xdgConfig := t.TempDir()
+	fontPath := filepath.Join(xdgConfig, "clk", "fonts", "custom-clock.fclk")
+	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
+		t.Fatalf("create font dir: %v", err)
+	}
+	if err := os.WriteFile(fontPath, []byte("0\nX\n"), 0o600); err != nil {
+		t.Fatalf("write font: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdgConfig)
+
+	cfg := Default()
+	cfg.Display.FclkFont = strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
+	cfg.Normalize()
+	if cfg.Display.FclkFont != strings.TrimSuffix(fontPath, filepath.Ext(fontPath)) {
+		t.Fatalf("expected discovered fclk font to be preserved, got %q", cfg.Display.FclkFont)
+	}
+}
+
 func TestNormalizeMigratesInlineSecondsStyle(t *testing.T) {
 	cfg := Default()
 	cfg.Display.SecondsStyle = "inline"
@@ -152,6 +224,11 @@ func TestNormalizeMigratesInlineSecondsStyle(t *testing.T) {
 func resetFigletFontCache() {
 	figletFontsOnce = sync.Once{}
 	figletFonts = nil
+}
+
+func resetFclkFontCache() {
+	fclkFontsOnce = sync.Once{}
+	fclkFonts = nil
 }
 
 func TestNoConfigSkipsDisk(t *testing.T) {

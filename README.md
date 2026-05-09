@@ -3,8 +3,8 @@
 `clk` is a Bubble Tea terminal clock with large digital renderers, themeable colors,
 animated seconds, optional inline seconds, Bubble Tea progress bars,
 Pomodoro and workday progress, blinking separators, double-size rendering,
-optional figlet/toilet font rendering, and YAML configuration saved under the
-user config directory.
+optional figlet/toilet and `.fclk` font rendering, and YAML configuration saved
+under the user config directory.
 
 ## Usage
 
@@ -20,6 +20,10 @@ Keybindings:
 
 Config is stored at `~/.config/clk/config.yaml` on Linux unless `--config` or
 `--no-config` is provided.
+
+User-defined `.fclk` clock fonts are discovered from `~/.config/clk/fonts` and
+the current working directory. Select the `fclk` digit style in settings, then
+use the `FCLK font` selector to choose a discovered font.
 
 Workday progress uses configurable start/end times and a `Work days` checkbox
 submenu in settings.

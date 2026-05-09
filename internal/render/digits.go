@@ -28,6 +28,7 @@ const (
 	StyleHalfBlock        DigitStyle = "half_block"
 	StyleHalfBlock2x      DigitStyle = "half_block_2x"
 	StyleNerdSegment      DigitStyle = "nerd_segment"
+	StyleFclk             DigitStyle = "fclk"
 	StyleFiglet           DigitStyle = "figlet"
 	StyleToilet           DigitStyle = "toilet"
 )
@@ -41,6 +42,7 @@ type ClockOptions struct {
 	Scale      int
 	FigletFont string
 	ToiletFont string
+	FclkFont   string
 }
 
 func Clock(value string, styleName string, nerdFont bool) string {
@@ -72,6 +74,10 @@ func ClockStyled(opts ClockOptions) string {
 		}
 	case StyleToilet:
 		if out, ok := externalClock(opts.Value, "toilet", defaultFont(opts.ToiletFont, "standard"), 1); ok {
+			return out
+		}
+	case StyleFclk:
+		if out, ok := fclkClock(opts.Value, opts.FclkFont); ok {
 			return out
 		}
 	}

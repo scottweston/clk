@@ -34,6 +34,7 @@ type DisplayConfig struct {
 	DigitStyle              string `yaml:"digit_style"`
 	FigletFont              string `yaml:"figlet_font"`
 	ToiletFont              string `yaml:"toilet_font"`
+	FclkFont                string `yaml:"fclk_font"`
 	SecondsStyle            string `yaml:"seconds_style"`
 	InlineSeconds           bool   `yaml:"inline_seconds"`
 	ProgressEmptyBackground string `yaml:"progress_empty_background"`
@@ -78,6 +79,7 @@ func Default() Config {
 			DigitStyle:              "block",
 			FigletFont:              "standard",
 			ToiletFont:              "standard",
+			FclkFont:                "",
 			SecondsStyle:            "progress_bar",
 			InlineSeconds:           false,
 			ProgressEmptyBackground: "theme",
@@ -184,6 +186,13 @@ func (c *Config) Normalize() {
 	if !contains(ToiletFontChoices(), c.Display.ToiletFont) {
 		c.Display.ToiletFont = "standard"
 	}
+	fclkFonts := FclkFontChoices()
+	if len(fclkFonts) > 0 && !contains(fclkFonts, c.Display.FclkFont) {
+		c.Display.FclkFont = fclkFonts[0]
+	}
+	if len(fclkFonts) == 0 {
+		c.Display.FclkFont = ""
+	}
 	if c.Display.SecondsStyle == "inline" {
 		c.Display.InlineSeconds = true
 		c.Display.SecondsStyle = "hidden"
@@ -231,6 +240,7 @@ var DigitStyles = []string{
 	"half_block",
 	"half_block_2x",
 	"nerd_segment",
+	"fclk",
 	"figlet",
 	"toilet",
 }

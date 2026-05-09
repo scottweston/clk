@@ -209,6 +209,8 @@ func (m *Model) openFontPicker() {
 		m.fontPickerKind = "figlet"
 	case "Toilet font":
 		m.fontPickerKind = "toilet"
+	case "FCLK font":
+		m.fontPickerKind = "fclk"
 	default:
 		return
 	}
@@ -306,6 +308,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		NerdFont:   m.cfg.UI.NerdFont,
 		FigletFont: m.cfg.Display.FigletFont,
 		ToiletFont: m.cfg.Display.ToiletFont,
+		FclkFont:   m.cfg.Display.FclkFont,
 	})
 	clock := styles.Clock.Render(clockArt)
 
@@ -622,6 +625,8 @@ func (m Model) fontPickerView(styles theme.Stylesheet) string {
 	title := "Figlet Fonts"
 	if m.fontPickerKind == "toilet" {
 		title = "Toilet Fonts"
+	} else if m.fontPickerKind == "fclk" {
+		title = "FCLK Fonts"
 	}
 	rows := []string{
 		styles.Muted.Render(title),
@@ -714,6 +719,9 @@ func (m Model) settingItems() []settingItem {
 	if m.cfg.Display.DigitStyle == "toilet" {
 		items = append(items, cycleItem("Toilet font", func(c config.Config) string { return c.Display.ToiletFont }, func(v string, c *config.Config) { c.Display.ToiletFont = v }, config.ToiletFontChoices()))
 	}
+	if m.cfg.Display.DigitStyle == "fclk" {
+		items = append(items, cycleItem("FCLK font", func(c config.Config) string { return c.Display.FclkFont }, func(v string, c *config.Config) { c.Display.FclkFont = v }, config.FclkFontChoices()))
+	}
 	items = append(items,
 		toggleItem("Blink sep", func(c config.Config) bool { return c.Display.BlinkSeparator }, func(v bool, c *config.Config) { c.Display.BlinkSeparator = v }),
 		toggleItem("Inline sec", func(c config.Config) bool { return c.Display.InlineSeconds }, func(v bool, c *config.Config) { c.Display.InlineSeconds = v }),
@@ -742,6 +750,9 @@ func cycleItem(label string, get func(config.Config) string, set func(string, *c
 		label: label,
 		value: get,
 		change: func(delta int, cfg *config.Config) {
+			if len(values) == 0 {
+				return
+			}
 			current := get(*cfg)
 			idx := indexOf(values, current)
 			if idx < 0 {
@@ -771,6 +782,9 @@ func toggleItem(label string, get func(config.Config) bool, set func(bool, *conf
 func (m Model) fontChoices() []string {
 	if m.fontPickerKind == "toilet" {
 		return config.ToiletFontChoices()
+	}
+	if m.fontPickerKind == "fclk" {
+		return config.FclkFontChoices()
 	}
 	return config.FigletFontChoices()
 }
@@ -808,6 +822,8 @@ func (m *Model) alignFontCursorToCurrent() {
 	current := m.cfg.Display.FigletFont
 	if m.fontPickerKind == "toilet" {
 		current = m.cfg.Display.ToiletFont
+	} else if m.fontPickerKind == "fclk" {
+		current = m.cfg.Display.FclkFont
 	}
 	choices := m.filteredFontChoices()
 	for i, choice := range choices {
@@ -826,6 +842,8 @@ func (m *Model) chooseFont() {
 	}
 	if m.fontPickerKind == "toilet" {
 		m.cfg.Display.ToiletFont = choices[m.fontCursor]
+	} else if m.fontPickerKind == "fclk" {
+		m.cfg.Display.FclkFont = choices[m.fontCursor]
 	} else {
 		m.cfg.Display.FigletFont = choices[m.fontCursor]
 	}
