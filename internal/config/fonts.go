@@ -243,10 +243,45 @@ func collectFonts(root string, extensions []string, pathValues bool, choices map
 	})
 }
 
+func collectFontsFlat(root string, extensions []string, pathValues bool, choices map[string]bool) {
+	if info, err := os.Stat(root); err != nil || !info.IsDir() {
+		return
+	}
+
+	exts := make(map[string]bool, len(extensions))
+	for _, ext := range extensions {
+		exts[strings.ToLower(ext)] = true
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(root, entry.Name())
+		ext := strings.ToLower(filepath.Ext(path))
+		if !exts[ext] {
+			continue
+		}
+		name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+		if name == "" {
+			continue
+		}
+		if pathValues {
+			choices[strings.TrimSuffix(path, filepath.Ext(path))] = true
+		} else {
+			choices[name] = true
+		}
+	}
+}
+
 func discoverFclkFonts() []string {
 	choices := make(map[string]bool)
 	for _, dir := range uniqueDirs(fclkFontDirs(), nil) {
-		collectFonts(dir, []string{".fclk"}, true, choices)
+		collectFontsFlat(dir, []string{".fclk"}, true, choices)
 	}
 
 	out := make([]string, 0, len(choices))
@@ -262,7 +297,7 @@ func discoverFclkFonts() []string {
 func fclkFontDirs() []string {
 	var dirs []string
 	if base, err := os.UserConfigDir(); err == nil {
-		dirs = append(dirs, filepath.Join(base, AppDir, "fonts"))
+		dirs = append(dirs, filepath.Join(base, AppDir))
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		dirs = append(dirs, cwd)

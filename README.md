@@ -21,9 +21,10 @@ Keybindings:
 Config is stored at `~/.config/clk/config.yaml` on Linux unless `--config` or
 `--no-config` is provided.
 
-User-defined `.fclk` clock fonts are discovered from `~/.config/clk/fonts` and
-the current working directory. Select the `fclk` digit style in settings, then
-use the `FCLK font` selector to choose a discovered font.
+User-defined `.fclk` clock fonts are discovered from the top level of
+`~/.config/clk` and the current working directory. Subdirectories are not
+searched. Select the `fclk` digit style in settings, then use the `FCLK font`
+selector to choose a discovered font.
 
 Workday progress uses configurable start/end times and a `Work days` checkbox
 submenu in settings.
