@@ -297,10 +297,10 @@ func discoverFclkFonts() []string {
 func fclkFontDirs() []string {
 	var dirs []string
 	if base, err := os.UserConfigDir(); err == nil {
-		dirs = append(dirs, filepath.Join(base, AppDir))
+		dirs = append(dirs, filepath.Join(base, AppDir, "fonts"))
 	}
 	if cwd, err := os.Getwd(); err == nil {
-		dirs = append(dirs, cwd)
+		dirs = append(dirs, filepath.Join(cwd, "fonts"))
 	}
 	return dirs
 }

@@ -55,6 +55,22 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 }
 
 func TestNormalizeInvalidValues(t *testing.T) {
+	resetFclkFontCache()
+	t.Cleanup(resetFclkFontCache)
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+
 	cfg := Config{
 		Time:    TimeConfig{Format: "bad"},
 		Display: DisplayConfig{DigitStyle: "bad", FigletFont: "bad", ToiletFont: "bad", FclkFont: "bad", SecondsStyle: "bad", ProgressEmptyBackground: "bad", Alignment: "bad", Size: "bad"},
@@ -142,7 +158,7 @@ func TestFclkFontChoicesIncludeConfigFonts(t *testing.T) {
 	t.Cleanup(resetFclkFontCache)
 
 	xdgConfig := t.TempDir()
-	fontPath := filepath.Join(xdgConfig, "clk", "custom-clock.fclk")
+	fontPath := filepath.Join(xdgConfig, "clk", "fonts", "custom-clock.fclk")
 	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
 		t.Fatalf("create font dir: %v", err)
 	}
@@ -157,12 +173,12 @@ func TestFclkFontChoicesIncludeConfigFonts(t *testing.T) {
 	}
 }
 
-func TestFclkFontChoicesIgnoreNestedConfigFonts(t *testing.T) {
+func TestFclkFontChoicesIgnoreConfigRootFonts(t *testing.T) {
 	resetFclkFontCache()
 	t.Cleanup(resetFclkFontCache)
 
 	xdgConfig := t.TempDir()
-	fontPath := filepath.Join(xdgConfig, "clk", "fonts", "nested-clock.fclk")
+	fontPath := filepath.Join(xdgConfig, "clk", "root-clock.fclk")
 	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
 		t.Fatalf("create font dir: %v", err)
 	}
@@ -173,11 +189,43 @@ func TestFclkFontChoicesIgnoreNestedConfigFonts(t *testing.T) {
 
 	unwanted := strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
 	if contains(FclkFontChoices(), unwanted) {
-		t.Fatalf("expected nested config fclk font %q to be ignored", unwanted)
+		t.Fatalf("expected config root fclk font %q to be ignored", unwanted)
 	}
 }
 
 func TestFclkFontChoicesIncludeCurrentDirectoryFonts(t *testing.T) {
+	resetFclkFontCache()
+	t.Cleanup(resetFclkFontCache)
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(cwd); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	dir := t.TempDir()
+	fontPath := filepath.Join(dir, "fonts", "local-clock.fclk")
+	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
+		t.Fatalf("create font dir: %v", err)
+	}
+	if err := os.WriteFile(fontPath, []byte("0\nX\n"), 0o600); err != nil {
+		t.Fatalf("write font: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	want := strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
+	if !contains(FclkFontChoices(), want) {
+		t.Fatalf("expected current directory fclk font %q in choices", want)
+	}
+}
+
+func TestFclkFontChoicesIgnoreCurrentDirectoryRootFonts(t *testing.T) {
 	resetFclkFontCache()
 	t.Cleanup(resetFclkFontCache)
 
@@ -200,41 +248,9 @@ func TestFclkFontChoicesIncludeCurrentDirectoryFonts(t *testing.T) {
 		t.Fatalf("chdir: %v", err)
 	}
 
-	want := strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
-	if !contains(FclkFontChoices(), want) {
-		t.Fatalf("expected current directory fclk font %q in choices", want)
-	}
-}
-
-func TestFclkFontChoicesIgnoreNestedCurrentDirectoryFonts(t *testing.T) {
-	resetFclkFontCache()
-	t.Cleanup(resetFclkFontCache)
-
-	cwd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(cwd); err != nil {
-			t.Fatalf("restore cwd: %v", err)
-		}
-	})
-
-	dir := t.TempDir()
-	fontPath := filepath.Join(dir, "fonts", "nested-clock.fclk")
-	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
-		t.Fatalf("create font dir: %v", err)
-	}
-	if err := os.WriteFile(fontPath, []byte("0\nX\n"), 0o600); err != nil {
-		t.Fatalf("write font: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-
 	unwanted := strings.TrimSuffix(fontPath, filepath.Ext(fontPath))
 	if contains(FclkFontChoices(), unwanted) {
-		t.Fatalf("expected nested current directory fclk font %q to be ignored", unwanted)
+		t.Fatalf("expected current directory root fclk font %q to be ignored", unwanted)
 	}
 }
 
@@ -243,7 +259,7 @@ func TestNormalizeAcceptsDiscoveredFclkFont(t *testing.T) {
 	t.Cleanup(resetFclkFontCache)
 
 	xdgConfig := t.TempDir()
-	fontPath := filepath.Join(xdgConfig, "clk", "custom-clock.fclk")
+	fontPath := filepath.Join(xdgConfig, "clk", "fonts", "custom-clock.fclk")
 	if err := os.MkdirAll(filepath.Dir(fontPath), 0o700); err != nil {
 		t.Fatalf("create font dir: %v", err)
 	}
