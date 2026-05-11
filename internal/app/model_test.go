@@ -42,20 +42,19 @@ func TestSettingsChangeAutosavesNoConfig(t *testing.T) {
 	}
 }
 
-func TestWorkdaySettingsChangeNoConfig(t *testing.T) {
+func TestWorkdayScheduleSettingsChangeNoConfig(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
 	m.settings = true
-	items := m.settingItems()
-	for i, item := range items {
-		if item.label == "Work start" {
-			m.cursor = i
-			break
-		}
-	}
+	m.workdays = true
 
-	m.changeSetting(1)
-	if m.cfg.Workday.StartTime == "09:00" {
-		t.Fatal("expected work start setting to change")
+	m.changeWorkdayTime(1)
+	if m.cfg.Workday.Schedule["mon"].StartTime == "09:00" {
+		t.Fatal("expected monday work start setting to change")
+	}
+	m.workdayEditEnd = true
+	m.changeWorkdayTime(1)
+	if m.cfg.Workday.Schedule["mon"].EndTime == "17:00" {
+		t.Fatal("expected monday work end setting to change")
 	}
 }
 
@@ -163,7 +162,7 @@ func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
 	m.height = 30
 	items := m.settingItems()
 	for i, item := range items {
-		if item.label == "Work days" {
+		if item.label == "Work schedule" {
 			m.cursor = i
 			break
 		}
@@ -177,8 +176,8 @@ func TestWorkdaySettingsOpenCheckboxSubmenu(t *testing.T) {
 	m.dayCursor = 5
 	m.adjustDayScroll()
 	out := m.settingsView(testStyles())
-	if !strings.Contains(out, "[x] Tuesday") || !strings.Contains(out, "[ ] Saturday") {
-		t.Fatalf("expected checkbox workday rows, got %q", out)
+	if !strings.Contains(out, "[x] Tuesday") || !strings.Contains(out, "[ ] Saturday") || !strings.Contains(out, "09:00") {
+		t.Fatalf("expected checkbox schedule rows, got %q", out)
 	}
 }
 
@@ -229,8 +228,8 @@ func TestWorkdayCheckboxToggleNoConfig(t *testing.T) {
 	m.dayCursor = 5
 
 	m.toggleWorkday("sat")
-	if !containsString(m.cfg.Workday.Days, "sat") {
-		t.Fatalf("expected saturday enabled, got %+v", m.cfg.Workday.Days)
+	if !m.cfg.Workday.Schedule["sat"].Enabled {
+		t.Fatalf("expected saturday enabled, got %+v", m.cfg.Workday.Schedule["sat"])
 	}
 	if m.saveError != "" {
 		t.Fatalf("unexpected save error: %s", m.saveError)
@@ -395,11 +394,7 @@ func TestWorkdayProgressViewAddsNerdFontDirectionMarkers(t *testing.T) {
 		NerdFont:        true,
 		Progress:        m.progressView,
 		WorkdayProgress: m.workdayProgressView,
-		Workday: render.WorkdayOptions{
-			StartTime: "09:00",
-			EndTime:   "17:00",
-			Days:      []string{"mon", "tue", "wed", "thu", "fri"},
-		},
+		Workday:         workdayOptions(config.Default().Workday),
 	}
 
 	opts.Time = time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local)
@@ -458,12 +453,8 @@ func TestWorkdayProgressViewFallsBackWithoutNerdFont(t *testing.T) {
 		NerdFont:        false,
 		Progress:        m.progressView,
 		WorkdayProgress: m.workdayProgressView,
-		Workday: render.WorkdayOptions{
-			StartTime: "09:00",
-			EndTime:   "17:00",
-			Days:      []string{"mon", "tue", "wed", "thu", "fri"},
-		},
-		Time: time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local),
+		Workday:         workdayOptions(config.Default().Workday),
+		Time:            time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local),
 	}
 
 	if got := render.SecondsStyled(opts); strings.Contains(got, "") || strings.Contains(got, "") {

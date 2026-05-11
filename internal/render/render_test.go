@@ -299,13 +299,9 @@ func TestPomodoroRendersCurrentCycle(t *testing.T) {
 
 func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
 	opts := SecondsOptions{
-		Style: "workday",
-		Width: 48,
-		Workday: WorkdayOptions{
-			StartTime: "09:00",
-			EndTime:   "17:00",
-			Days:      []string{"mon", "tue", "wed", "thu", "fri"},
-		},
+		Style:   "workday",
+		Width:   48,
+		Workday: testWorkdayOptions(),
 	}
 
 	opts.Time = time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local)
@@ -319,11 +315,14 @@ func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
 	}
 
 	opts.Time = time.Date(2026, 5, 1, 9, 8, 30, 0, time.Local)
-	opts.Workday.EndTime = "18:00"
+	friday := opts.Workday.Schedule["fri"]
+	friday.EndTime = "18:00"
+	opts.Workday.Schedule["fri"] = friday
 	if got := SecondsStyled(opts); !strings.Contains(got, "workday 08:52") {
 		t.Fatalf("expected partial remaining minute to round up, got %q", got)
 	}
-	opts.Workday.EndTime = "17:00"
+	friday.EndTime = "17:00"
+	opts.Workday.Schedule["fri"] = friday
 
 	opts.Time = time.Date(2026, 5, 1, 18, 0, 0, 0, time.Local)
 	if got := SecondsStyled(opts); !strings.Contains(got, "workday 63:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
@@ -334,6 +333,40 @@ func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
 	if got := SecondsStyled(opts); !strings.Contains(got, "off 44:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
 		t.Fatalf("expected off day bar to drain toward next start, got %q", got)
 	}
+}
+
+func TestWorkdayUsesPerDayScheduleBoundaries(t *testing.T) {
+	opts := SecondsOptions{
+		Style:   "workday",
+		Width:   48,
+		Workday: testWorkdayOptions(),
+	}
+	monday := opts.Workday.Schedule["mon"]
+	monday.StartTime = "12:00"
+	monday.EndTime = "14:00"
+	opts.Workday.Schedule["mon"] = monday
+
+	opts.Time = time.Date(2026, 5, 4, 11, 30, 0, 0, time.Local)
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 00:30") {
+		t.Fatalf("expected monday start boundary, got %q", got)
+	}
+
+	opts.Time = time.Date(2026, 5, 4, 13, 0, 0, 0, time.Local)
+	if got := SecondsStyled(opts); !strings.Contains(got, "workday 01:00") {
+		t.Fatalf("expected monday end boundary, got %q", got)
+	}
+}
+
+func testWorkdayOptions() WorkdayOptions {
+	return WorkdayOptions{Schedule: map[string]WorkdayDayOptions{
+		"mon": {Enabled: true, StartTime: "09:00", EndTime: "17:00"},
+		"tue": {Enabled: true, StartTime: "09:00", EndTime: "17:00"},
+		"wed": {Enabled: true, StartTime: "09:00", EndTime: "17:00"},
+		"thu": {Enabled: true, StartTime: "09:00", EndTime: "17:00"},
+		"fri": {Enabled: true, StartTime: "09:00", EndTime: "17:00"},
+		"sat": {Enabled: false, StartTime: "09:00", EndTime: "17:00"},
+		"sun": {Enabled: false, StartTime: "09:00", EndTime: "17:00"},
+	}}
 }
 
 func TestScaleDoublesClockArt(t *testing.T) {

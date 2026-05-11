@@ -33,6 +33,7 @@ type Model struct {
 	dayScrollOffset  int
 	workdays         bool
 	dayCursor        int
+	workdayEditEnd   bool
 	fontPicker       bool
 	fontPickerKind   string
 	fontQuery        string
@@ -147,6 +148,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.adjustDayScroll()
 	case m.settings && m.workdays && key.Matches(msg, m.keys.Choose):
 		m.toggleWorkday(config.WorkdayNames[m.dayCursor])
+	case m.settings && m.workdays && key.Matches(msg, m.keys.Left):
+		m.changeWorkdayTime(-1)
+	case m.settings && m.workdays && key.Matches(msg, m.keys.Right):
+		m.changeWorkdayTime(1)
+	case m.settings && m.workdays && msg.String() == "tab":
+		m.workdayEditEnd = !m.workdayEditEnd
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Up):
 		if m.cursor > 0 {
 			m.cursor--
@@ -241,14 +248,37 @@ func (m *Model) changeSetting(delta int) {
 }
 
 func (m *Model) toggleWorkday(day string) {
-	if containsString(m.cfg.Workday.Days, day) {
-		if len(m.cfg.Workday.Days) <= 1 {
-			return
-		}
-		m.cfg.Workday.Days = removeString(m.cfg.Workday.Days, day)
-	} else {
-		m.cfg.Workday.Days = append(m.cfg.Workday.Days, day)
+	entry := m.cfg.Workday.Schedule[day]
+	entry.Enabled = !entry.Enabled
+	m.cfg.Workday.Schedule[day] = entry
+	m.saveConfig()
+}
+
+func (m *Model) changeWorkdayTime(delta int) {
+	if m.dayCursor < 0 || m.dayCursor >= len(config.WorkdayNames) {
+		return
 	}
+	day := config.WorkdayNames[m.dayCursor]
+	entry := m.cfg.Workday.Schedule[day]
+	current := entry.StartTime
+	if m.workdayEditEnd {
+		current = entry.EndTime
+	}
+	idx := indexOf(config.TimeChoices, current)
+	if idx < 0 {
+		idx = 0
+	}
+	idx = (idx + delta + len(config.TimeChoices)) % len(config.TimeChoices)
+	if m.workdayEditEnd {
+		entry.EndTime = config.TimeChoices[idx]
+	} else {
+		entry.StartTime = config.TimeChoices[idx]
+	}
+	m.cfg.Workday.Schedule[day] = entry
+	m.saveConfig()
+}
+
+func (m *Model) saveConfig() {
 	m.cfg.Normalize()
 	if err := m.manager.Save(m.cfg); err != nil {
 		m.saveError = fmt.Sprintf("config save failed: %v", err)
@@ -329,11 +359,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		Muted:           theme.Lookup(m.cfg.Theme.Name).Muted,
 		Progress:        m.progressView,
 		WorkdayProgress: m.workdayProgressView,
-		Workday: render.WorkdayOptions{
-			StartTime: m.cfg.Workday.StartTime,
-			EndTime:   m.cfg.Workday.EndTime,
-			Days:      m.cfg.Workday.Days,
-		},
+		Workday:         workdayOptions(m.cfg.Workday),
 	})
 	if seconds != "" {
 		lines = append(lines, "")
@@ -662,13 +688,27 @@ func (m Model) workdaysView(styles theme.Stylesheet) string {
 		end = len(config.WorkdayNames)
 	}
 
-	rows := []string{styles.Muted.Render("Work Days")}
+	mode := "start"
+	if m.workdayEditEnd {
+		mode = "end"
+	}
+	rows := []string{styles.Muted.Render("Work Schedule " + mode)}
 	for i := start; i < end; i++ {
+		day := config.WorkdayNames[i]
+		entry := m.cfg.Workday.Schedule[day]
 		box := "[ ]"
-		if containsString(m.cfg.Workday.Days, config.WorkdayNames[i]) {
+		if entry.Enabled {
 			box = "[x]"
 		}
-		row := fmt.Sprintf("%s %-9s", box, workdayLabel(config.WorkdayNames[i]))
+		startValue := entry.StartTime
+		endValue := entry.EndTime
+		if i == m.dayCursor && !m.workdayEditEnd {
+			startValue = "<" + startValue + ">"
+		}
+		if i == m.dayCursor && m.workdayEditEnd {
+			endValue = "<" + endValue + ">"
+		}
+		row := fmt.Sprintf("%s %-9s %7s %7s", box, workdayLabel(day), startValue, endValue)
 		if i == m.dayCursor {
 			row = styles.Selected.Render(" " + row + " ")
 		} else {
@@ -682,7 +722,7 @@ func (m Model) workdaysView(styles theme.Stylesheet) string {
 			rows = append(rows, styles.Muted.Render(fmt.Sprintf("... %d more ▼", remaining)))
 		}
 	}
-	rows = append(rows, "", styles.Muted.Render("enter/space toggles • esc returns • autosaves"))
+	rows = append(rows, "", styles.Muted.Render("enter toggles • tab field • left/right time • autosaves"))
 	return styles.Panel.Render(strings.Join(rows, "\n"))
 }
 
@@ -727,9 +767,7 @@ func (m Model) settingItems() []settingItem {
 		toggleItem("Inline sec", func(c config.Config) bool { return c.Display.InlineSeconds }, func(v bool, c *config.Config) { c.Display.InlineSeconds = v }),
 		cycleItem("Seconds", func(c config.Config) string { return c.Display.SecondsStyle }, func(v string, c *config.Config) { c.Display.SecondsStyle = v }, config.SecondsStyles),
 		cycleItem("Bar bg", func(c config.Config) string { return c.Display.ProgressEmptyBackground }, func(v string, c *config.Config) { c.Display.ProgressEmptyBackground = v }, config.ProgressEmptyBackgrounds),
-		cycleItem("Work start", func(c config.Config) string { return c.Workday.StartTime }, func(v string, c *config.Config) { c.Workday.StartTime = v }, config.TimeChoices),
-		cycleItem("Work end", func(c config.Config) string { return c.Workday.EndTime }, func(v string, c *config.Config) { c.Workday.EndTime = v }, config.TimeChoices),
-		submenuItem("Work days", func(c config.Config) string { return strings.Join(c.Workday.Days, ",") }, "workdays"),
+		submenuItem("Work schedule", func(c config.Config) string { return workdayScheduleSummary(c.Workday) }, "workdays"),
 		cycleItem("Alignment", func(c config.Config) string { return c.Display.Alignment }, func(v string, c *config.Config) { c.Display.Alignment = v }, config.Alignments),
 		toggleItem("Nerd Font", func(c config.Config) bool { return c.UI.NerdFont }, func(v bool, c *config.Config) { c.UI.NerdFont = v }),
 	)
@@ -866,6 +904,32 @@ func fontChoiceLabel(choice string) string {
 		}
 	}
 	return choice
+}
+
+func workdayOptions(cfg config.WorkdayConfig) render.WorkdayOptions {
+	schedule := make(map[string]render.WorkdayDayOptions, len(config.WorkdayNames))
+	for _, day := range config.WorkdayNames {
+		entry := cfg.Schedule[day]
+		schedule[day] = render.WorkdayDayOptions{
+			Enabled:   entry.Enabled,
+			StartTime: entry.StartTime,
+			EndTime:   entry.EndTime,
+		}
+	}
+	return render.WorkdayOptions{Schedule: schedule}
+}
+
+func workdayScheduleSummary(cfg config.WorkdayConfig) string {
+	enabled := make([]string, 0, len(config.WorkdayNames))
+	for _, day := range config.WorkdayNames {
+		if cfg.Schedule[day].Enabled {
+			enabled = append(enabled, day)
+		}
+	}
+	if len(enabled) == 0 {
+		return "off"
+	}
+	return strings.Join(enabled, ",")
 }
 
 func containsString(values []string, value string) bool {

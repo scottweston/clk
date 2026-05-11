@@ -23,9 +23,13 @@ type SecondsOptions struct {
 }
 
 type WorkdayOptions struct {
+	Schedule map[string]WorkdayDayOptions
+}
+
+type WorkdayDayOptions struct {
+	Enabled   bool
 	StartTime string
 	EndTime   string
-	Days      []string
 }
 
 type ProgressDirection string
@@ -163,20 +167,9 @@ func formatHoursMinutesCeil(d time.Duration) string {
 }
 
 func WorkdayProgress(now time.Time, opts WorkdayOptions) ProgressInfo {
-	start, ok := parseClockMinutes(opts.StartTime)
-	if !ok {
-		start = 9 * 60
-	}
-	end, ok := parseClockMinutes(opts.EndTime)
-	if !ok {
-		end = 17 * 60
-	}
-	if end <= start {
-		end = start + 1
-	}
-
 	nowMinute := now.Hour()*60 + now.Minute()
-	workingDay := isConfiguredWorkday(now.Weekday(), opts.Days)
+	dayConfig, workingDay := workdayConfig(now.Weekday(), opts.Schedule)
+	start, end := workdayBoundaries(dayConfig)
 	label := "workday"
 
 	if workingDay && nowMinute >= start && nowMinute < end {
@@ -198,8 +191,24 @@ func WorkdayProgress(now time.Time, opts WorkdayOptions) ProgressInfo {
 		label = "off"
 	}
 
-	nextStart := nextWorkBoundary(now, start, opts.Days, true)
-	previousEnd := previousWorkBoundary(nextStart, end, opts.Days)
+	nextStart, ok := nextWorkBoundary(now, opts.Schedule, true)
+	if !ok {
+		return ProgressInfo{
+			Percent:   0,
+			Label:     "off",
+			Remaining: 0,
+			Direction: ProgressDirectionDown,
+		}
+	}
+	previousEnd, ok := previousWorkBoundary(nextStart, opts.Schedule)
+	if !ok {
+		return ProgressInfo{
+			Percent:   0,
+			Label:     label,
+			Remaining: nextStart.Sub(now),
+			Direction: ProgressDirectionDown,
+		}
+	}
 	total := nextStart.Sub(previousEnd)
 	remaining := nextStart.Sub(now)
 	if remaining < 0 {
@@ -218,33 +227,37 @@ func WorkdayProgress(now time.Time, opts WorkdayOptions) ProgressInfo {
 	}
 }
 
-func nextWorkBoundary(now time.Time, minutes int, days []string, includeToday bool) time.Time {
+func nextWorkBoundary(now time.Time, schedule map[string]WorkdayDayOptions, includeToday bool) (time.Time, bool) {
 	for offset := 0; offset <= 7; offset++ {
 		day := now.AddDate(0, 0, offset)
-		if !isConfiguredWorkday(day.Weekday(), days) {
+		dayConfig, enabled := workdayConfig(day.Weekday(), schedule)
+		if !enabled {
 			continue
 		}
-		boundary := timeOnDay(day, minutes)
+		start, _ := workdayBoundaries(dayConfig)
+		boundary := timeOnDay(day, start)
 		if (offset == 0 && !includeToday) || !boundary.After(now) {
 			continue
 		}
-		return boundary
+		return boundary, true
 	}
-	return timeOnDay(now.AddDate(0, 0, 1), minutes)
+	return time.Time{}, false
 }
 
-func previousWorkBoundary(now time.Time, minutes int, days []string) time.Time {
+func previousWorkBoundary(now time.Time, schedule map[string]WorkdayDayOptions) (time.Time, bool) {
 	for offset := 0; offset <= 7; offset++ {
 		day := now.AddDate(0, 0, -offset)
-		if !isConfiguredWorkday(day.Weekday(), days) {
+		dayConfig, enabled := workdayConfig(day.Weekday(), schedule)
+		if !enabled {
 			continue
 		}
-		boundary := timeOnDay(day, minutes)
+		_, end := workdayBoundaries(dayConfig)
+		boundary := timeOnDay(day, end)
 		if boundary.Before(now) {
-			return boundary
+			return boundary, true
 		}
 	}
-	return timeOnDay(now.AddDate(0, 0, -1), minutes)
+	return time.Time{}, false
 }
 
 func timeOnDay(day time.Time, minutes int) time.Time {
@@ -279,17 +292,32 @@ func parseClockMinutes(value string) (int, bool) {
 	return t.Hour()*60 + t.Minute(), true
 }
 
-func isConfiguredWorkday(day time.Weekday, days []string) bool {
-	if len(days) == 0 {
-		days = []string{"mon", "tue", "wed", "thu", "fri"}
-	}
+func workdayConfig(day time.Weekday, schedule map[string]WorkdayDayOptions) (WorkdayDayOptions, bool) {
 	current := weekdayName(day)
-	for _, configured := range days {
-		if configured == current {
-			return true
-		}
+	if len(schedule) == 0 {
+		enabled := current != "sat" && current != "sun"
+		return WorkdayDayOptions{Enabled: enabled, StartTime: "09:00", EndTime: "17:00"}, enabled
 	}
-	return false
+	entry, ok := schedule[current]
+	if !ok {
+		return WorkdayDayOptions{Enabled: false, StartTime: "09:00", EndTime: "17:00"}, false
+	}
+	return entry, entry.Enabled
+}
+
+func workdayBoundaries(entry WorkdayDayOptions) (int, int) {
+	start, ok := parseClockMinutes(entry.StartTime)
+	if !ok {
+		start = 9 * 60
+	}
+	end, ok := parseClockMinutes(entry.EndTime)
+	if !ok {
+		end = 17 * 60
+	}
+	if end <= start {
+		end = start + 1
+	}
+	return start, end
 }
 
 func weekdayName(day time.Weekday) string {

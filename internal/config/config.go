@@ -44,9 +44,16 @@ type DisplayConfig struct {
 }
 
 type WorkdayConfig struct {
-	StartTime string   `yaml:"start_time"`
-	EndTime   string   `yaml:"end_time"`
-	Days      []string `yaml:"days"`
+	Schedule        map[string]WorkdayDayConfig `yaml:"schedule"`
+	legacyStartTime string
+	legacyEndTime   string
+	legacyDays      []string
+}
+
+type WorkdayDayConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	StartTime string `yaml:"start_time"`
+	EndTime   string `yaml:"end_time"`
 }
 
 type ThemeConfig struct {
@@ -87,9 +94,7 @@ func Default() Config {
 			BlinkSeparator:          false,
 		},
 		Workday: WorkdayConfig{
-			StartTime: "09:00",
-			EndTime:   "17:00",
-			Days:      []string{"mon", "tue", "wed", "thu", "fri"},
+			Schedule: defaultWorkdaySchedule(),
 		},
 		Theme: ThemeConfig{
 			Name:   "tokyo-night",
@@ -206,13 +211,7 @@ func (c *Config) Normalize() {
 	if !contains(Alignments, c.Display.Alignment) {
 		c.Display.Alignment = "center"
 	}
-	if !contains(TimeChoices, c.Workday.StartTime) {
-		c.Workday.StartTime = "09:00"
-	}
-	if !contains(TimeChoices, c.Workday.EndTime) {
-		c.Workday.EndTime = "17:00"
-	}
-	c.Workday.Days = normalizeWorkdays(c.Workday.Days)
+	c.Workday.Normalize()
 	if c.Theme.Name == "" {
 		c.Theme.Name = "tokyo-night"
 	}
@@ -275,6 +274,121 @@ var TimeChoices = []string{
 var WorkdayNames = []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
 
 var Accents = []string{"cyan", "green", "pink", "purple", "yellow", "orange", "red", "blue"}
+
+func (w *WorkdayConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := rejectUnknownMappingFields(value, map[string]bool{
+		"schedule":   true,
+		"start_time": true,
+		"end_time":   true,
+		"days":       true,
+	}); err != nil {
+		return err
+	}
+	type rawWorkdayConfig struct {
+		Schedule  map[string]WorkdayDayConfig `yaml:"schedule"`
+		StartTime string                      `yaml:"start_time"`
+		EndTime   string                      `yaml:"end_time"`
+		Days      []string                    `yaml:"days"`
+	}
+	var raw rawWorkdayConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	w.Schedule = raw.Schedule
+	w.legacyStartTime = raw.StartTime
+	w.legacyEndTime = raw.EndTime
+	w.legacyDays = raw.Days
+	return nil
+}
+
+func (w *WorkdayDayConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := rejectUnknownMappingFields(value, map[string]bool{
+		"enabled":    true,
+		"start_time": true,
+		"end_time":   true,
+	}); err != nil {
+		return err
+	}
+	type rawWorkdayDayConfig WorkdayDayConfig
+	var raw rawWorkdayDayConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*w = WorkdayDayConfig(raw)
+	return nil
+}
+
+func rejectUnknownMappingFields(value *yaml.Node, allowed map[string]bool) error {
+	if value.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i < len(value.Content); i += 2 {
+		key := value.Content[i].Value
+		if !allowed[key] {
+			return fmt.Errorf("field %s not found", key)
+		}
+	}
+	return nil
+}
+
+func (w *WorkdayConfig) Normalize() {
+	if len(w.Schedule) == 0 && (w.legacyStartTime != "" || w.legacyEndTime != "" || len(w.legacyDays) > 0) {
+		start := normalizeWorkdayTime(w.legacyStartTime, "09:00")
+		end := normalizeWorkdayTime(w.legacyEndTime, "17:00")
+		days := normalizeWorkdays(w.legacyDays)
+		w.Schedule = make(map[string]WorkdayDayConfig, len(WorkdayNames))
+		for _, day := range WorkdayNames {
+			w.Schedule[day] = WorkdayDayConfig{
+				Enabled:   contains(days, day),
+				StartTime: start,
+				EndTime:   end,
+			}
+		}
+	}
+
+	if len(w.Schedule) == 0 {
+		w.Schedule = defaultWorkdaySchedule()
+		return
+	}
+
+	normalized := make(map[string]WorkdayDayConfig, len(WorkdayNames))
+	for _, day := range WorkdayNames {
+		entry := w.Schedule[day]
+		if entry.StartTime == "" && entry.EndTime == "" {
+			entry = defaultWorkdayEntry(day)
+		}
+		entry.StartTime = normalizeWorkdayTime(entry.StartTime, "09:00")
+		entry.EndTime = normalizeWorkdayTime(entry.EndTime, "17:00")
+		normalized[day] = entry
+	}
+	w.Schedule = normalized
+	w.legacyStartTime = ""
+	w.legacyEndTime = ""
+	w.legacyDays = nil
+}
+
+func defaultWorkdaySchedule() map[string]WorkdayDayConfig {
+	schedule := make(map[string]WorkdayDayConfig, len(WorkdayNames))
+	for _, day := range WorkdayNames {
+		schedule[day] = defaultWorkdayEntry(day)
+	}
+	return schedule
+}
+
+func defaultWorkdayEntry(day string) WorkdayDayConfig {
+	return WorkdayDayConfig{
+		Enabled:   contains([]string{"mon", "tue", "wed", "thu", "fri"}, day),
+		StartTime: "09:00",
+		EndTime:   "17:00",
+	}
+}
+
+func normalizeWorkdayTime(value, fallback string) string {
+	if contains(TimeChoices, value) {
+		return value
+	}
+	return fallback
+}
 
 func contains(values []string, value string) bool {
 	for _, candidate := range values {

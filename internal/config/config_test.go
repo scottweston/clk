@@ -19,8 +19,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Display.ProgressEmptyBackground != "theme" {
 		t.Fatalf("expected theme progress empty background, got %q", cfg.Display.ProgressEmptyBackground)
 	}
-	if cfg.Workday.StartTime != "09:00" || cfg.Workday.EndTime != "17:00" {
-		t.Fatalf("expected default workday 09:00-17:00, got %+v", cfg.Workday)
+	if cfg.Workday.Schedule["mon"].StartTime != "09:00" || cfg.Workday.Schedule["mon"].EndTime != "17:00" || !cfg.Workday.Schedule["mon"].Enabled || cfg.Workday.Schedule["sat"].Enabled {
+		t.Fatalf("expected default weekday 09:00-17:00 schedule, got %+v", cfg.Workday)
 	}
 }
 
@@ -40,6 +40,13 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	}
 	if loaded.Display.DigitStyle != "braille" || !loaded.UI.NerdFont {
 		t.Fatalf("loaded config mismatch: %+v", loaded)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if strings.Contains(string(data), "start_time: \"09:00\"\n  end_time: \"17:00\"\n  days:") {
+		t.Fatalf("expected saved config to use schedule shape, got:\n%s", data)
 	}
 }
 
@@ -74,15 +81,63 @@ func TestNormalizeInvalidValues(t *testing.T) {
 	cfg := Config{
 		Time:    TimeConfig{Format: "bad"},
 		Display: DisplayConfig{DigitStyle: "bad", FigletFont: "bad", ToiletFont: "bad", FclkFont: "bad", SecondsStyle: "bad", ProgressEmptyBackground: "bad", Alignment: "bad", Size: "bad"},
-		Workday: WorkdayConfig{StartTime: "bad", EndTime: "bad", Days: []string{"wat"}},
-		Theme:   ThemeConfig{Accent: "bad"},
+		Workday: WorkdayConfig{Schedule: map[string]WorkdayDayConfig{
+			"mon": {Enabled: true, StartTime: "bad", EndTime: "bad"},
+			"wat": {Enabled: true, StartTime: "12:00", EndTime: "13:00"},
+		}},
+		Theme: ThemeConfig{Accent: "bad"},
 	}
 	cfg.Normalize()
 	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.FclkFont != "" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.ProgressEmptyBackground != "theme" || cfg.Display.Size != "" {
 		t.Fatalf("invalid values were not normalized: %+v", cfg)
 	}
-	if cfg.Workday.StartTime != "09:00" || cfg.Workday.EndTime != "17:00" || strings.Join(cfg.Workday.Days, ",") != "mon,tue,wed,thu,fri" {
+	if cfg.Workday.Schedule["mon"].StartTime != "09:00" || cfg.Workday.Schedule["mon"].EndTime != "17:00" || !cfg.Workday.Schedule["mon"].Enabled || cfg.Workday.Schedule["sat"].Enabled {
 		t.Fatalf("invalid workday values were not normalized: %+v", cfg.Workday)
+	}
+}
+
+func TestLoadMigratesLegacyWorkdayConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte(`version: 1
+time:
+    format: 24h
+    show_date: true
+    timezone: Local
+display:
+    digit_style: block
+    figlet_font: standard
+    toilet_font: standard
+    fclk_font: ""
+    seconds_style: progress_bar
+    inline_seconds: false
+    progress_empty_background: theme
+    alignment: center
+    blink_separator: false
+workday:
+    start_time: "10:00"
+    end_time: "16:30"
+    days:
+        - tue
+        - thu
+theme:
+    name: tokyo-night
+    accent: cyan
+ui:
+    nerd_font: false
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := NewManager(path, false).Load()
+	if err != nil {
+		t.Fatalf("load legacy config: %v", err)
+	}
+	if !cfg.Workday.Schedule["tue"].Enabled || !cfg.Workday.Schedule["thu"].Enabled || cfg.Workday.Schedule["mon"].Enabled {
+		t.Fatalf("expected legacy days to migrate, got %+v", cfg.Workday.Schedule)
+	}
+	if cfg.Workday.Schedule["tue"].StartTime != "10:00" || cfg.Workday.Schedule["tue"].EndTime != "16:30" {
+		t.Fatalf("expected legacy times to migrate, got %+v", cfg.Workday.Schedule["tue"])
 	}
 }
 
