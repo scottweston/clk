@@ -357,6 +357,70 @@ func TestWorkdayUsesPerDayScheduleBoundaries(t *testing.T) {
 	}
 }
 
+func TestCalendarRendersUpcomingAndActiveEvents(t *testing.T) {
+	opts := CalendarOptions{Events: []CalendarEventOptions{
+		{
+			Summary: "Standup",
+			Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 9, 30, 0, 0, time.Local),
+		},
+	}}
+
+	before := Calendar(time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local), 48, nil, nil, false, opts)
+	if !strings.Contains(before, "event Standup 00:30") || !strings.Contains(before, "[") {
+		t.Fatalf("expected upcoming calendar event, got %q", before)
+	}
+
+	during := Calendar(time.Date(2026, 5, 1, 9, 15, 0, 0, time.Local), 48, nil, nil, false, opts)
+	if !strings.Contains(during, "event Standup 00:15") || !strings.Contains(during, "[") {
+		t.Fatalf("expected active calendar event, got %q", during)
+	}
+}
+
+func TestCalendarProgressCountsDownThenUp(t *testing.T) {
+	baseline := time.Date(2026, 5, 1, 8, 0, 0, 0, time.Local)
+	opts := CalendarOptions{Events: []CalendarEventOptions{
+		{
+			Summary: "Focus",
+			Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 10, 0, 0, 0, time.Local),
+		},
+	}, Baseline: baseline}
+
+	before, ok := CalendarProgress(time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local), opts)
+	if !ok || before.Direction != ProgressDirectionDown || before.Remaining != 30*time.Minute || before.Percent != 0.5 {
+		t.Fatalf("expected countdown before event, got %+v ok=%v", before, ok)
+	}
+
+	during, ok := CalendarProgress(time.Date(2026, 5, 1, 9, 30, 0, 0, time.Local), opts)
+	if !ok || during.Direction != ProgressDirectionUp || during.Percent != 0.5 {
+		t.Fatalf("expected countup during event, got %+v ok=%v", during, ok)
+	}
+}
+
+func TestCalendarProgressCountsDownFromPreviousCompletedEvent(t *testing.T) {
+	opts := CalendarOptions{
+		Events: []CalendarEventOptions{
+			{
+				Summary: "Previous",
+				Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 5, 1, 10, 0, 0, 0, time.Local),
+			},
+			{
+				Summary: "Next",
+				Start:   time.Date(2026, 5, 1, 14, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 5, 1, 15, 0, 0, 0, time.Local),
+			},
+		},
+		Baseline: time.Date(2026, 5, 1, 8, 0, 0, 0, time.Local),
+	}
+
+	info, ok := CalendarProgress(time.Date(2026, 5, 1, 12, 0, 0, 0, time.Local), opts)
+	if !ok || info.Label != "Next" || info.Direction != ProgressDirectionDown || info.Percent != 0.5 {
+		t.Fatalf("expected countdown from previous event end, got %+v ok=%v", info, ok)
+	}
+}
+
 func testWorkdayOptions() WorkdayOptions {
 	return WorkdayOptions{Schedule: map[string]WorkdayDayOptions{
 		"mon": {Enabled: true, StartTime: "09:00", EndTime: "17:00"},

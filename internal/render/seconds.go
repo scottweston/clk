@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -30,6 +31,17 @@ type WorkdayDayOptions struct {
 	Enabled   bool
 	StartTime string
 	EndTime   string
+}
+
+type CalendarOptions struct {
+	Events   []CalendarEventOptions
+	Baseline time.Time
+}
+
+type CalendarEventOptions struct {
+	Summary string
+	Start   time.Time
+	End     time.Time
 }
 
 type ProgressDirection string
@@ -158,6 +170,57 @@ func workday(now time.Time, width int, progress func(float64, int) string, direc
 	return label + " " + bar
 }
 
+func Calendar(now time.Time, width int, progress func(float64, int) string, directionalProgress func(float64, int, ProgressDirection) string, nerdFont bool, opts CalendarOptions) string {
+	info, ok := CalendarProgress(now, opts)
+	if !ok {
+		return ""
+	}
+	remaining := formatHoursMinutesCeil(info.Remaining)
+	label := calendarLabel(info.Label, remaining, width)
+	barWidth := width - utf8.RuneCountInString(label) - 2
+	if barWidth < 1 {
+		barWidth = 1
+	}
+	barWidth = normalizeBarWidth(barWidth)
+	bar := progressView(progress, info.Percent, barWidth)
+	if nerdFont && directionalProgress != nil {
+		bar = directionalProgress(info.Percent, barWidth, info.Direction)
+	}
+	return label + " " + bar
+}
+
+func calendarLabel(summary, remaining string, width int) string {
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		summary = "event"
+	}
+	prefix := "event"
+	baseRunes := utf8.RuneCountInString(prefix) + 1 + utf8.RuneCountInString(remaining)
+	available := width - normalizeBarWidth(12) - 2 - baseRunes - 1
+	if available < 0 {
+		available = 0
+	}
+	if available == 0 {
+		return fmt.Sprintf("%s %s", prefix, remaining)
+	}
+	summary = truncateRunes(summary, available)
+	return fmt.Sprintf("%s %s %s", prefix, summary, remaining)
+}
+
+func truncateRunes(value string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(value) <= maxRunes {
+		return value
+	}
+	if maxRunes <= 3 {
+		return strings.Repeat(".", maxRunes)
+	}
+	runes := []rune(value)
+	return string(runes[:maxRunes-3]) + "..."
+}
+
 func formatHoursMinutesCeil(d time.Duration) string {
 	if d < 0 {
 		d = 0
@@ -225,6 +288,83 @@ func WorkdayProgress(now time.Time, opts WorkdayOptions) ProgressInfo {
 		Remaining: remaining,
 		Direction: ProgressDirectionDown,
 	}
+}
+
+func CalendarProgress(now time.Time, opts CalendarOptions) (ProgressInfo, bool) {
+	events := calendarEvents(opts.Events)
+	if len(events) == 0 {
+		return ProgressInfo{}, false
+	}
+
+	var previousEnd time.Time
+	var hasPrevious bool
+	for _, event := range events {
+		if !event.End.After(event.Start) {
+			event.End = event.Start.Add(time.Minute)
+		}
+		if !event.Start.After(now) && event.End.After(now) {
+			elapsed := now.Sub(event.Start)
+			total := event.End.Sub(event.Start)
+			if elapsed < 0 {
+				elapsed = 0
+			}
+			return ProgressInfo{
+				Percent:   float64(elapsed) / float64(total),
+				Label:     event.Summary,
+				Remaining: event.End.Sub(now),
+				Direction: ProgressDirectionUp,
+			}, true
+		}
+		if event.Start.After(now) {
+			remaining := event.Start.Sub(now)
+			baseline := opts.Baseline
+			if hasPrevious {
+				baseline = previousEnd
+			}
+			total := remaining
+			if !baseline.IsZero() && baseline.Before(event.Start) {
+				total = event.Start.Sub(baseline)
+			}
+			percent := 0.0
+			if total > 0 {
+				percent = float64(remaining) / float64(total)
+			}
+			return ProgressInfo{
+				Percent:   percent,
+				Label:     event.Summary,
+				Remaining: remaining,
+				Direction: ProgressDirectionDown,
+			}, true
+		}
+		if event.End.After(previousEnd) {
+			previousEnd = event.End
+			hasPrevious = true
+		}
+	}
+	return ProgressInfo{}, false
+}
+
+func calendarEvents(events []CalendarEventOptions) []CalendarEventOptions {
+	out := make([]CalendarEventOptions, 0, len(events))
+	for _, event := range events {
+		if event.Start.IsZero() {
+			continue
+		}
+		if event.Summary == "" {
+			event.Summary = "event"
+		}
+		if !event.End.After(event.Start) {
+			event.End = event.Start.Add(time.Minute)
+		}
+		out = append(out, event)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Start.Equal(out[j].Start) {
+			return out[i].End.Before(out[j].End)
+		}
+		return out[i].Start.Before(out[j].Start)
+	})
+	return out
 }
 
 func nextWorkBoundary(now time.Time, schedule map[string]WorkdayDayOptions, includeToday bool) (time.Time, bool) {

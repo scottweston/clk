@@ -22,6 +22,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Workday.Schedule["mon"].StartTime != "09:00" || cfg.Workday.Schedule["mon"].EndTime != "17:00" || !cfg.Workday.Schedule["mon"].Enabled || cfg.Workday.Schedule["sat"].Enabled {
 		t.Fatalf("expected default weekday 09:00-17:00 schedule, got %+v", cfg.Workday)
 	}
+	if cfg.Workday.ShowProgress {
+		t.Fatal("expected default workday progress bar to be off")
+	}
+	if cfg.Calendar.ShowProgress || cfg.Calendar.URL != "" || cfg.Calendar.RefreshMinutes != 15 {
+		t.Fatalf("unexpected default calendar config: %+v", cfg.Calendar)
+	}
 }
 
 func TestSaveAndLoadConfig(t *testing.T) {
@@ -85,7 +91,8 @@ func TestNormalizeInvalidValues(t *testing.T) {
 			"mon": {Enabled: true, StartTime: "bad", EndTime: "bad"},
 			"wat": {Enabled: true, StartTime: "12:00", EndTime: "13:00"},
 		}},
-		Theme: ThemeConfig{Accent: "bad"},
+		Calendar: CalendarConfig{URL: " https://example.com/cal.ics ", RefreshMinutes: -1},
+		Theme:    ThemeConfig{Accent: "bad"},
 	}
 	cfg.Normalize()
 	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.FclkFont != "" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.ProgressEmptyBackground != "theme" || cfg.Display.Size != "" {
@@ -93,6 +100,22 @@ func TestNormalizeInvalidValues(t *testing.T) {
 	}
 	if cfg.Workday.Schedule["mon"].StartTime != "09:00" || cfg.Workday.Schedule["mon"].EndTime != "17:00" || !cfg.Workday.Schedule["mon"].Enabled || cfg.Workday.Schedule["sat"].Enabled {
 		t.Fatalf("invalid workday values were not normalized: %+v", cfg.Workday)
+	}
+	if cfg.Calendar.URL != "https://example.com/cal.ics" || cfg.Calendar.RefreshMinutes != 15 {
+		t.Fatalf("calendar values were not normalized: %+v", cfg.Calendar)
+	}
+}
+
+func TestNormalizeMigratesLegacyWorkdaySecondsStyle(t *testing.T) {
+	cfg := Default()
+	cfg.Display.SecondsStyle = "workday"
+	cfg.Normalize()
+
+	if cfg.Display.SecondsStyle != "hidden" {
+		t.Fatalf("expected workday seconds style to migrate to hidden, got %q", cfg.Display.SecondsStyle)
+	}
+	if !cfg.Workday.ShowProgress {
+		t.Fatal("expected workday progress bar to be enabled")
 	}
 }
 

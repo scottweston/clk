@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"sort"
@@ -11,11 +12,13 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lucasb-eyer/go-colorful"
 
 	"clk/internal/config"
+	"clk/internal/ics"
 	"clk/internal/render"
 	"clk/internal/theme"
 )
@@ -26,6 +29,7 @@ type Model struct {
 	width            int
 	height           int
 	now              time.Time
+	startedAt        time.Time
 	settings         bool
 	helpOpen         bool
 	cursor           int
@@ -39,7 +43,10 @@ type Model struct {
 	fontQuery        string
 	fontCursor       int
 	fontScrollOffset int
+	urlEditor        bool
+	urlInput         textinput.Model
 	saveError        string
+	calendarEvents   []ics.Event
 	help             help.Model
 	progress         progress.Model
 	keys             keyMap
@@ -48,6 +55,13 @@ type Model struct {
 }
 
 type tickMsg time.Time
+
+type calendarRefreshMsg struct{}
+
+type calendarFetchMsg struct {
+	url    string
+	events []ics.Event
+}
 
 const progressEmptyCharacter = '⣿'
 
@@ -58,10 +72,13 @@ const (
 
 func New(cfg config.Config, manager config.Manager) Model {
 	cfg.Normalize()
+	now := time.Now()
 	return Model{
 		cfg:        cfg,
 		manager:    manager,
-		now:        time.Now(),
+		now:        now,
+		startedAt:  now,
+		urlInput:   newCalendarURLInput(),
 		help:       help.New(),
 		progress:   newProgressModel(cfg),
 		keys:       keys,
@@ -71,7 +88,7 @@ func New(cfg config.Config, manager config.Manager) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tick()
+	return tea.Batch(tick(), m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -82,6 +99,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tickMsg:
 		m.now = time.Time(msg)
 		return m, tick()
+	case calendarRefreshMsg:
+		return m, tea.Batch(m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
+	case calendarFetchMsg:
+		if msg.url != m.cfg.Calendar.URL {
+			return m, nil
+		}
+		m.calendarEvents = msg.events
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -119,6 +143,8 @@ func (m Model) View() string {
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case m.settings && m.urlEditor:
+		return m.handleCalendarURLKey(msg)
 	case m.settings && m.fontPicker:
 		m.handleFontPickerKey(msg)
 	case key.Matches(msg, m.keys.Quit):
@@ -167,13 +193,37 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case m.settings && !m.workdays && msg.String() == "/":
 		m.openFontPicker()
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Left):
-		m.changeSetting(-1)
+		return m, m.changeSetting(-1)
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Right):
-		m.changeSetting(1)
+		return m, m.changeSetting(1)
 	case m.settings && !m.workdays && key.Matches(msg, m.keys.Choose):
-		m.changeSetting(1)
+		return m, m.changeSetting(1)
 	}
 	return m, nil
+}
+
+func (m Model) handleCalendarURLKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, m.keys.Back):
+		m.urlEditor = false
+		return m, nil
+	case msg.Type == tea.KeyEnter:
+		before := m.cfg.Calendar
+		m.cfg.Calendar.URL = strings.TrimSpace(m.urlInput.Value())
+		m.urlEditor = false
+		m.saveConfig()
+		if m.saveError != "" {
+			return m, nil
+		}
+		if calendarRefreshChanged(before, m.cfg.Calendar) {
+			return m, tea.Batch(m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
+		}
+		return m, nil
+	default:
+		input, cmd := m.urlInput.Update(msg)
+		m.urlInput = input
+		return m, cmd
+	}
 }
 
 func (m *Model) handleFontPickerKey(msg tea.KeyMsg) {
@@ -228,23 +278,39 @@ func (m *Model) openFontPicker() {
 	m.alignFontCursorToCurrent()
 }
 
-func (m *Model) changeSetting(delta int) {
+func (m *Model) openCalendarURLEditor() {
+	m.urlInput = newCalendarURLInput()
+	m.urlInput.SetValue(m.cfg.Calendar.URL)
+	m.urlInput.Focus()
+	m.urlEditor = true
+}
+
+func (m *Model) changeSetting(delta int) tea.Cmd {
 	items := m.settingItems()
 	if m.cursor < 0 || m.cursor >= len(items) {
-		return
+		return nil
 	}
 	if items[m.cursor].submenu == "workdays" {
 		m.workdays = true
-		return
+		return nil
 	}
+	if items[m.cursor].submenu == "calendar_url" {
+		m.openCalendarURLEditor()
+		return nil
+	}
+	beforeCalendar := m.cfg.Calendar
 	items[m.cursor].change(delta, &m.cfg)
 	m.cfg.Normalize()
 	m.updateProgressColors()
 	if err := m.manager.Save(m.cfg); err != nil {
 		m.saveError = fmt.Sprintf("config save failed: %v", err)
-		return
+		return nil
 	}
 	m.saveError = ""
+	if calendarRefreshChanged(beforeCalendar, m.cfg.Calendar) {
+		return tea.Batch(m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
+	}
+	return nil
 }
 
 func (m *Model) toggleWorkday(day string) {
@@ -364,6 +430,28 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 	if seconds != "" {
 		lines = append(lines, "")
 		lines = append(lines, styles.Seconds.Render(seconds))
+	}
+	if m.cfg.Workday.ShowProgress {
+		workday := render.SecondsStyled(render.SecondsOptions{
+			Time:            now,
+			Style:           "workday",
+			Width:           secondsWidth,
+			NerdFont:        m.cfg.UI.NerdFont,
+			Progress:        m.progressView,
+			WorkdayProgress: m.workdayProgressView,
+			Workday:         workdayOptions(m.cfg.Workday),
+		})
+		if workday != "" {
+			lines = append(lines, "")
+			lines = append(lines, styles.Seconds.Render(workday))
+		}
+	}
+	if m.cfg.Calendar.ShowProgress {
+		calendar := render.Calendar(now, secondsWidth, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, calendarOptions(m.calendarEvents, m.startedAt))
+		if calendar != "" {
+			lines = append(lines, "")
+			lines = append(lines, styles.Seconds.Render(calendar))
+		}
 	}
 	return joinVerticalWithBackground(lipgloss.Center, background, lines...)
 }
@@ -604,6 +692,9 @@ func (m Model) clockText(now time.Time) string {
 }
 
 func (m Model) settingsView(styles theme.Stylesheet) string {
+	if m.urlEditor {
+		return m.calendarURLView(styles)
+	}
 	if m.fontPicker {
 		return m.fontPickerView(styles)
 	}
@@ -636,6 +727,16 @@ func (m Model) settingsView(styles theme.Stylesheet) string {
 		}
 	}
 	rows = append(rows, "", styles.Muted.Render("enter/right changes • esc closes • autosaves"))
+	return styles.Panel.Render(strings.Join(rows, "\n"))
+}
+
+func (m Model) calendarURLView(styles theme.Stylesheet) string {
+	rows := []string{
+		styles.Muted.Render("ICS URL"),
+		m.urlInput.View(),
+		"",
+		styles.Muted.Render("enter saves • esc returns"),
+	}
 	return styles.Panel.Render(strings.Join(rows, "\n"))
 }
 
@@ -767,6 +868,9 @@ func (m Model) settingItems() []settingItem {
 		toggleItem("Inline sec", func(c config.Config) bool { return c.Display.InlineSeconds }, func(v bool, c *config.Config) { c.Display.InlineSeconds = v }),
 		cycleItem("Seconds", func(c config.Config) string { return c.Display.SecondsStyle }, func(v string, c *config.Config) { c.Display.SecondsStyle = v }, config.SecondsStyles),
 		cycleItem("Bar bg", func(c config.Config) string { return c.Display.ProgressEmptyBackground }, func(v string, c *config.Config) { c.Display.ProgressEmptyBackground = v }, config.ProgressEmptyBackgrounds),
+		toggleItem("Workday bar", func(c config.Config) bool { return c.Workday.ShowProgress }, func(v bool, c *config.Config) { c.Workday.ShowProgress = v }),
+		toggleItem("ICS bar", func(c config.Config) bool { return c.Calendar.ShowProgress }, func(v bool, c *config.Config) { c.Calendar.ShowProgress = v }),
+		submenuItem("ICS URL", func(c config.Config) string { return calendarURLSummary(c.Calendar) }, "calendar_url"),
 		submenuItem("Work schedule", func(c config.Config) string { return workdayScheduleSummary(c.Workday) }, "workdays"),
 		cycleItem("Alignment", func(c config.Config) string { return c.Display.Alignment }, func(v string, c *config.Config) { c.Display.Alignment = v }, config.Alignments),
 		toggleItem("Nerd Font", func(c config.Config) bool { return c.UI.NerdFont }, func(v bool, c *config.Config) { c.UI.NerdFont = v }),
@@ -919,6 +1023,18 @@ func workdayOptions(cfg config.WorkdayConfig) render.WorkdayOptions {
 	return render.WorkdayOptions{Schedule: schedule}
 }
 
+func calendarOptions(events []ics.Event, baseline time.Time) render.CalendarOptions {
+	out := make([]render.CalendarEventOptions, 0, len(events))
+	for _, event := range events {
+		out = append(out, render.CalendarEventOptions{
+			Summary: event.Summary,
+			Start:   event.Start,
+			End:     event.End,
+		})
+	}
+	return render.CalendarOptions{Events: out, Baseline: baseline}
+}
+
 func workdayScheduleSummary(cfg config.WorkdayConfig) string {
 	enabled := make([]string, 0, len(config.WorkdayNames))
 	for _, day := range config.WorkdayNames {
@@ -930,6 +1046,33 @@ func workdayScheduleSummary(cfg config.WorkdayConfig) string {
 		return "off"
 	}
 	return strings.Join(enabled, ",")
+}
+
+func calendarURLSummary(cfg config.CalendarConfig) string {
+	if strings.TrimSpace(cfg.URL) == "" {
+		return "unset"
+	}
+	return truncateSettingValue(cfg.URL, 28)
+}
+
+func truncateSettingValue(value string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	if len([]rune(value)) <= maxRunes {
+		return value
+	}
+	if maxRunes <= 3 {
+		return strings.Repeat(".", maxRunes)
+	}
+	runes := []rune(value)
+	return string(runes[:maxRunes-3]) + "..."
+}
+
+func calendarRefreshChanged(before, after config.CalendarConfig) bool {
+	return before.ShowProgress != after.ShowProgress ||
+		before.URL != after.URL ||
+		before.RefreshMinutes != after.RefreshMinutes
 }
 
 func containsString(values []string, value string) bool {
@@ -968,6 +1111,44 @@ func removeString(values []string, value string) []string {
 		}
 	}
 	return out
+}
+
+func (m Model) fetchCalendarCmd() tea.Cmd {
+	cfg := m.cfg.Calendar
+	if !cfg.ShowProgress || cfg.URL == "" {
+		return nil
+	}
+	source := cfg.URL
+	now := m.displayTime()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		events, _ := ics.Fetch(ctx, source, now)
+		return calendarFetchMsg{url: source, events: events}
+	}
+}
+
+func (m Model) scheduleCalendarRefreshCmd() tea.Cmd {
+	cfg := m.cfg.Calendar
+	if !cfg.ShowProgress || cfg.URL == "" {
+		return nil
+	}
+	refresh := cfg.RefreshMinutes
+	if refresh <= 0 {
+		refresh = 15
+	}
+	return tea.Tick(time.Duration(refresh)*time.Minute, func(time.Time) tea.Msg {
+		return calendarRefreshMsg{}
+	})
+}
+
+func newCalendarURLInput() textinput.Model {
+	input := textinput.New()
+	input.Prompt = ""
+	input.Placeholder = "https://example.com/calendar.ics"
+	input.CharLimit = 2048
+	input.Width = 48
+	return input
 }
 
 func tick() tea.Cmd {

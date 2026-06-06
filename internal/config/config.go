@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -16,12 +17,13 @@ const (
 )
 
 type Config struct {
-	Version int           `yaml:"version"`
-	Time    TimeConfig    `yaml:"time"`
-	Display DisplayConfig `yaml:"display"`
-	Workday WorkdayConfig `yaml:"workday"`
-	Theme   ThemeConfig   `yaml:"theme"`
-	UI      UIConfig      `yaml:"ui"`
+	Version  int            `yaml:"version"`
+	Time     TimeConfig     `yaml:"time"`
+	Display  DisplayConfig  `yaml:"display"`
+	Workday  WorkdayConfig  `yaml:"workday"`
+	Calendar CalendarConfig `yaml:"calendar"`
+	Theme    ThemeConfig    `yaml:"theme"`
+	UI       UIConfig       `yaml:"ui"`
 }
 
 type TimeConfig struct {
@@ -45,6 +47,7 @@ type DisplayConfig struct {
 
 type WorkdayConfig struct {
 	Schedule        map[string]WorkdayDayConfig `yaml:"schedule"`
+	ShowProgress    bool                        `yaml:"show_progress"`
 	legacyStartTime string
 	legacyEndTime   string
 	legacyDays      []string
@@ -54,6 +57,12 @@ type WorkdayDayConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	StartTime string `yaml:"start_time"`
 	EndTime   string `yaml:"end_time"`
+}
+
+type CalendarConfig struct {
+	ShowProgress   bool   `yaml:"show_progress"`
+	URL            string `yaml:"url"`
+	RefreshMinutes int    `yaml:"refresh_minutes"`
 }
 
 type ThemeConfig struct {
@@ -94,7 +103,13 @@ func Default() Config {
 			BlinkSeparator:          false,
 		},
 		Workday: WorkdayConfig{
-			Schedule: defaultWorkdaySchedule(),
+			Schedule:     defaultWorkdaySchedule(),
+			ShowProgress: false,
+		},
+		Calendar: CalendarConfig{
+			ShowProgress:   false,
+			URL:            "",
+			RefreshMinutes: 15,
 		},
 		Theme: ThemeConfig{
 			Name:   "tokyo-night",
@@ -202,6 +217,10 @@ func (c *Config) Normalize() {
 		c.Display.InlineSeconds = true
 		c.Display.SecondsStyle = "hidden"
 	}
+	if c.Display.SecondsStyle == "workday" {
+		c.Workday.ShowProgress = true
+		c.Display.SecondsStyle = "hidden"
+	}
 	if !contains(SecondsStyles, c.Display.SecondsStyle) {
 		c.Display.SecondsStyle = "progress_bar"
 	}
@@ -212,6 +231,7 @@ func (c *Config) Normalize() {
 		c.Display.Alignment = "center"
 	}
 	c.Workday.Normalize()
+	c.Calendar.Normalize()
 	if c.Theme.Name == "" {
 		c.Theme.Name = "tokyo-night"
 	}
@@ -253,7 +273,6 @@ var SecondsStyles = []string{
 	"braille_circle",
 	"nerd_pulse",
 	"pomodoro",
-	"workday",
 }
 
 var ProgressEmptyBackgrounds = []string{"theme", "accent", "muted", "foreground", "warning"}
@@ -277,24 +296,27 @@ var Accents = []string{"cyan", "green", "pink", "purple", "yellow", "orange", "r
 
 func (w *WorkdayConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := rejectUnknownMappingFields(value, map[string]bool{
-		"schedule":   true,
-		"start_time": true,
-		"end_time":   true,
-		"days":       true,
+		"schedule":      true,
+		"show_progress": true,
+		"start_time":    true,
+		"end_time":      true,
+		"days":          true,
 	}); err != nil {
 		return err
 	}
 	type rawWorkdayConfig struct {
-		Schedule  map[string]WorkdayDayConfig `yaml:"schedule"`
-		StartTime string                      `yaml:"start_time"`
-		EndTime   string                      `yaml:"end_time"`
-		Days      []string                    `yaml:"days"`
+		Schedule     map[string]WorkdayDayConfig `yaml:"schedule"`
+		ShowProgress bool                        `yaml:"show_progress"`
+		StartTime    string                      `yaml:"start_time"`
+		EndTime      string                      `yaml:"end_time"`
+		Days         []string                    `yaml:"days"`
 	}
 	var raw rawWorkdayConfig
 	if err := value.Decode(&raw); err != nil {
 		return err
 	}
 	w.Schedule = raw.Schedule
+	w.ShowProgress = raw.ShowProgress
 	w.legacyStartTime = raw.StartTime
 	w.legacyEndTime = raw.EndTime
 	w.legacyDays = raw.Days
@@ -315,6 +337,23 @@ func (w *WorkdayDayConfig) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 	*w = WorkdayDayConfig(raw)
+	return nil
+}
+
+func (c *CalendarConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := rejectUnknownMappingFields(value, map[string]bool{
+		"show_progress":   true,
+		"url":             true,
+		"refresh_minutes": true,
+	}); err != nil {
+		return err
+	}
+	type rawCalendarConfig CalendarConfig
+	var raw rawCalendarConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*c = CalendarConfig(raw)
 	return nil
 }
 
@@ -365,6 +404,16 @@ func (w *WorkdayConfig) Normalize() {
 	w.legacyStartTime = ""
 	w.legacyEndTime = ""
 	w.legacyDays = nil
+}
+
+func (c *CalendarConfig) Normalize() {
+	c.URL = strings.TrimSpace(c.URL)
+	if c.RefreshMinutes <= 0 {
+		c.RefreshMinutes = 15
+	}
+	if c.RefreshMinutes > 24*60 {
+		c.RefreshMinutes = 24 * 60
+	}
 }
 
 func defaultWorkdaySchedule() map[string]WorkdayDayConfig {

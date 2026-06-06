@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"clk/internal/config"
+	"clk/internal/ics"
 	"clk/internal/render"
 	"clk/internal/theme"
 )
@@ -72,6 +73,41 @@ func TestProgressBackgroundSettingsChangeNoConfig(t *testing.T) {
 	}
 	if m.saveError != "" {
 		t.Fatalf("unexpected save error: %s", m.saveError)
+	}
+}
+
+func TestSettingsExposeScheduleProgressControls(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	for _, label := range []string{"Workday bar", "ICS bar", "ICS URL"} {
+		if !hasSettingItem(m, label) {
+			t.Fatalf("expected setting %q", label)
+		}
+	}
+}
+
+func TestCalendarURLSettingsEditorSavesNoConfig(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	m.settings = true
+	m.cursor = settingIndex(m, "ICS URL")
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(Model)
+	if !updated.urlEditor {
+		t.Fatal("expected calendar URL editor to open")
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(" https://example.com/work.ics ")})
+	updated = next.(Model)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated = next.(Model)
+	if updated.urlEditor {
+		t.Fatal("expected calendar URL editor to close after save")
+	}
+	if updated.cfg.Calendar.URL != "https://example.com/work.ics" {
+		t.Fatalf("expected trimmed calendar URL to be saved, got %q", updated.cfg.Calendar.URL)
+	}
+	if updated.saveError != "" {
+		t.Fatalf("unexpected save error: %s", updated.saveError)
 	}
 }
 
@@ -349,6 +385,74 @@ func TestBubbleProgressStylesUseCurrentTime(t *testing.T) {
 		if out := m.View(); !strings.Contains(out, tc.want) {
 			t.Fatalf("expected %s to render %s from current time, got %q", tc.style, tc.want, out)
 		}
+	}
+}
+
+func TestCalendarProgressBarRendersFetchedEvent(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Calendar.ShowProgress = true
+	m := New(cfg, config.NewManager("", true))
+	m.width = 100
+	m.height = 30
+	m.now = time.Date(2026, 5, 1, 9, 30, 0, 0, time.Local)
+	m.calendarEvents = []ics.Event{
+		{
+			Summary: "Standup",
+			Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 10, 0, 0, 0, time.Local),
+		},
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "Standup") || !strings.Contains(out, "50%") {
+		t.Fatalf("expected calendar event progress, got %q", out)
+	}
+}
+
+func TestCalendarProgressBarCountsDownFromLaunchTime(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Calendar.ShowProgress = true
+	m := New(cfg, config.NewManager("", true))
+	m.width = 100
+	m.height = 30
+	m.startedAt = time.Date(2026, 5, 1, 8, 0, 0, 0, time.Local)
+	m.now = time.Date(2026, 5, 1, 10, 0, 0, 0, time.Local)
+	m.calendarEvents = []ics.Event{
+		{
+			Summary: "Later",
+			Start:   time.Date(2026, 5, 1, 12, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local),
+		},
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "Later") || !strings.Contains(out, "50%") {
+		t.Fatalf("expected calendar countdown from launch time, got %q", out)
+	}
+}
+
+func TestWorkdayAndCalendarProgressBarsCanRenderTogether(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Workday.ShowProgress = true
+	cfg.Calendar.ShowProgress = true
+	m := New(cfg, config.NewManager("", true))
+	m.width = 100
+	m.height = 30
+	m.now = time.Date(2026, 5, 1, 13, 30, 0, 0, time.Local)
+	m.calendarEvents = []ics.Event{
+		{
+			Summary: "Planning",
+			Start:   time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 14, 0, 0, 0, time.Local),
+		},
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "workday") || !strings.Contains(out, "Planning") {
+		t.Fatalf("expected workday and calendar progress bars, got %q", out)
 	}
 }
 
