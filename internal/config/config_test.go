@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -35,6 +36,14 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	manager := NewManager(path, false)
 	cfg := Default()
 	cfg.Display.DigitStyle = "braille"
+	cfg.Calendar.ShowProgress = true
+	cfg.Calendar.URL = "https://example.com/work.ics"
+	cfg.Calendar.LastEvent = CalendarEventConfig{
+		SourceURL: cfg.Calendar.URL,
+		Summary:   "Standup",
+		Start:     time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
+		End:       time.Date(2026, 5, 1, 9, 30, 0, 0, time.UTC),
+	}
 	cfg.UI.NerdFont = true
 
 	if err := manager.Save(cfg); err != nil {
@@ -47,12 +56,31 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if loaded.Display.DigitStyle != "braille" || !loaded.UI.NerdFont {
 		t.Fatalf("loaded config mismatch: %+v", loaded)
 	}
+	if loaded.Calendar.LastEvent.Summary != "Standup" || !loaded.Calendar.LastEvent.End.Equal(cfg.Calendar.LastEvent.End) {
+		t.Fatalf("loaded calendar last event mismatch: %+v", loaded.Calendar.LastEvent)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read saved config: %v", err)
 	}
 	if strings.Contains(string(data), "start_time: \"09:00\"\n  end_time: \"17:00\"\n  days:") {
 		t.Fatalf("expected saved config to use schedule shape, got:\n%s", data)
+	}
+}
+
+func TestSaveDefaultConfigOmitsEmptyCalendarLastEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	manager := NewManager(path, false)
+
+	if err := manager.Save(Default()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if strings.Contains(string(data), "last_event") {
+		t.Fatalf("expected empty calendar last event to be omitted, got:\n%s", data)
 	}
 }
 
@@ -91,8 +119,17 @@ func TestNormalizeInvalidValues(t *testing.T) {
 			"mon": {Enabled: true, StartTime: "bad", EndTime: "bad"},
 			"wat": {Enabled: true, StartTime: "12:00", EndTime: "13:00"},
 		}},
-		Calendar: CalendarConfig{URL: " https://example.com/cal.ics ", RefreshMinutes: -1},
-		Theme:    ThemeConfig{Accent: "bad"},
+		Calendar: CalendarConfig{
+			URL:            " https://example.com/cal.ics ",
+			RefreshMinutes: -1,
+			LastEvent: CalendarEventConfig{
+				SourceURL: "https://example.com/other.ics",
+				Summary:   "Old",
+				Start:     time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
+				End:       time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC),
+			},
+		},
+		Theme: ThemeConfig{Accent: "bad"},
 	}
 	cfg.Normalize()
 	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.FclkFont != "" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.ProgressEmptyBackground != "theme" || cfg.Display.Size != "" {
@@ -103,6 +140,9 @@ func TestNormalizeInvalidValues(t *testing.T) {
 	}
 	if cfg.Calendar.URL != "https://example.com/cal.ics" || cfg.Calendar.RefreshMinutes != 15 {
 		t.Fatalf("calendar values were not normalized: %+v", cfg.Calendar)
+	}
+	if !cfg.Calendar.LastEvent.Start.IsZero() {
+		t.Fatalf("expected stale calendar last event to be cleared, got %+v", cfg.Calendar.LastEvent)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,9 +61,17 @@ type WorkdayDayConfig struct {
 }
 
 type CalendarConfig struct {
-	ShowProgress   bool   `yaml:"show_progress"`
-	URL            string `yaml:"url"`
-	RefreshMinutes int    `yaml:"refresh_minutes"`
+	ShowProgress   bool                `yaml:"show_progress"`
+	URL            string              `yaml:"url"`
+	RefreshMinutes int                 `yaml:"refresh_minutes"`
+	LastEvent      CalendarEventConfig `yaml:"last_event,omitempty"`
+}
+
+type CalendarEventConfig struct {
+	SourceURL string    `yaml:"source_url,omitempty"`
+	Summary   string    `yaml:"summary,omitempty"`
+	Start     time.Time `yaml:"start,omitempty"`
+	End       time.Time `yaml:"end,omitempty"`
 }
 
 type ThemeConfig struct {
@@ -345,6 +354,7 @@ func (c *CalendarConfig) UnmarshalYAML(value *yaml.Node) error {
 		"show_progress":   true,
 		"url":             true,
 		"refresh_minutes": true,
+		"last_event":      true,
 	}); err != nil {
 		return err
 	}
@@ -354,6 +364,24 @@ func (c *CalendarConfig) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 	*c = CalendarConfig(raw)
+	return nil
+}
+
+func (e *CalendarEventConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := rejectUnknownMappingFields(value, map[string]bool{
+		"source_url": true,
+		"summary":    true,
+		"start":      true,
+		"end":        true,
+	}); err != nil {
+		return err
+	}
+	type rawCalendarEventConfig CalendarEventConfig
+	var raw rawCalendarEventConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*e = CalendarEventConfig(raw)
 	return nil
 }
 
@@ -413,6 +441,15 @@ func (c *CalendarConfig) Normalize() {
 	}
 	if c.RefreshMinutes > 24*60 {
 		c.RefreshMinutes = 24 * 60
+	}
+	c.LastEvent.Normalize(c.URL)
+}
+
+func (e *CalendarEventConfig) Normalize(sourceURL string) {
+	e.SourceURL = strings.TrimSpace(e.SourceURL)
+	e.Summary = strings.TrimSpace(e.Summary)
+	if sourceURL == "" || e.SourceURL == "" || e.SourceURL != sourceURL || e.Start.IsZero() || e.End.IsZero() || !e.End.After(e.Start) {
+		*e = CalendarEventConfig{}
 	}
 }
 

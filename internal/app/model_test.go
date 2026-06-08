@@ -1,6 +1,7 @@
 package app
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +109,35 @@ func TestCalendarURLSettingsEditorSavesNoConfig(t *testing.T) {
 	}
 	if updated.saveError != "" {
 		t.Fatalf("unexpected save error: %s", updated.saveError)
+	}
+}
+
+func TestCalendarURLChangeClearsRememberedLastEvent(t *testing.T) {
+	cfg := config.Default()
+	cfg.Calendar.URL = "https://example.com/old.ics"
+	cfg.Calendar.LastEvent = config.CalendarEventConfig{
+		SourceURL: cfg.Calendar.URL,
+		Summary:   "Old",
+		Start:     time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
+		End:       time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC),
+	}
+	m := New(cfg, config.NewManager("", true))
+	m.settings = true
+	m.urlEditor = true
+	m.urlInput = newCalendarURLInput()
+	m.urlInput.SetValue("https://example.com/new.ics")
+	m.calendarEvents = []ics.Event{{Summary: "Cached", Start: cfg.Calendar.LastEvent.Start, End: cfg.Calendar.LastEvent.End}}
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated := next.(Model)
+	if updated.cfg.Calendar.URL != "https://example.com/new.ics" {
+		t.Fatalf("expected changed calendar URL, got %q", updated.cfg.Calendar.URL)
+	}
+	if !updated.cfg.Calendar.LastEvent.Start.IsZero() {
+		t.Fatalf("expected remembered calendar event to be cleared, got %+v", updated.cfg.Calendar.LastEvent)
+	}
+	if len(updated.calendarEvents) != 0 {
+		t.Fatalf("expected cached calendar events to be cleared, got %+v", updated.calendarEvents)
 	}
 }
 
@@ -430,6 +460,99 @@ func TestCalendarProgressBarCountsDownFromLaunchTime(t *testing.T) {
 	out := m.View()
 	if !strings.Contains(out, "Later") || !strings.Contains(out, "50%") {
 		t.Fatalf("expected calendar countdown from launch time, got %q", out)
+	}
+}
+
+func TestCalendarProgressBarCountsDownFromRememberedLastEvent(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Calendar.ShowProgress = true
+	cfg.Calendar.URL = "https://example.com/work.ics"
+	cfg.Calendar.LastEvent = config.CalendarEventConfig{
+		SourceURL: cfg.Calendar.URL,
+		Summary:   "Previous",
+		Start:     time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+		End:       time.Date(2026, 5, 1, 10, 0, 0, 0, time.Local),
+	}
+	m := New(cfg, config.NewManager("", true))
+	m.width = 100
+	m.height = 30
+	m.startedAt = time.Date(2026, 5, 1, 11, 0, 0, 0, time.Local)
+	m.now = time.Date(2026, 5, 1, 12, 0, 0, 0, time.Local)
+	m.calendarEvents = []ics.Event{
+		{
+			Summary: "Later",
+			Start:   time.Date(2026, 5, 1, 14, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 15, 0, 0, 0, time.Local),
+		},
+	}
+
+	out := m.View()
+	if !strings.Contains(out, "Later") || !strings.Contains(out, "50%") {
+		t.Fatalf("expected calendar countdown from remembered last event, got %q", out)
+	}
+}
+
+func TestCalendarFetchRemembersMostRecentPastEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Calendar.ShowProgress = true
+	cfg.Calendar.URL = "https://example.com/work.ics"
+	manager := config.NewManager(path, false)
+	m := New(cfg, manager)
+	m.now = time.Date(2026, 5, 1, 12, 0, 0, 0, time.Local)
+
+	next, _ := m.Update(calendarFetchMsg{
+		url: cfg.Calendar.URL,
+		events: []ics.Event{
+			{
+				Summary: "Older",
+				Start:   time.Date(2026, 5, 1, 8, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+			},
+			{
+				Summary: "Recent",
+				Start:   time.Date(2026, 5, 1, 10, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 5, 1, 11, 0, 0, 0, time.Local),
+			},
+			{
+				Summary: "Next",
+				Start:   time.Date(2026, 5, 1, 14, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 5, 1, 15, 0, 0, 0, time.Local),
+			},
+		},
+	})
+	updated := next.(Model)
+	if updated.cfg.Calendar.LastEvent.Summary != "Recent" {
+		t.Fatalf("expected most recent past event to be remembered, got %+v", updated.cfg.Calendar.LastEvent)
+	}
+	loaded, err := manager.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if loaded.Calendar.LastEvent.Summary != "Recent" {
+		t.Fatalf("expected remembered event to be persisted, got %+v", loaded.Calendar.LastEvent)
+	}
+}
+
+func TestCalendarTickRemembersEventAfterItEnds(t *testing.T) {
+	cfg := config.Default()
+	cfg.Calendar.ShowProgress = true
+	cfg.Calendar.URL = "https://example.com/work.ics"
+	m := New(cfg, config.NewManager("", true))
+	m.calendarEvents = []ics.Event{
+		{
+			Summary: "Finished",
+			Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 10, 0, 0, 0, time.Local),
+		},
+	}
+
+	next, _ := m.Update(tickMsg(time.Date(2026, 5, 1, 10, 0, 0, 0, time.Local)))
+	updated := next.(Model)
+	if updated.cfg.Calendar.LastEvent.Summary != "Finished" {
+		t.Fatalf("expected ended event to be remembered on tick, got %+v", updated.cfg.Calendar.LastEvent)
 	}
 }
 

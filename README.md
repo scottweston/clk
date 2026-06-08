@@ -30,3 +30,24 @@ Workday progress uses configurable start/end times and a `Work days` checkbox
 submenu in settings. Workday and ICS calendar progress bars can be enabled
 independently in settings; set the `ICS URL` value to an HTTP(S) `.ics` feed for
 calendar countdown/countup progress.
+
+The calendar countdown normally uses the most recent completed event from the
+feed as its baseline, and remembers that event in config in case the feed later
+purges old entries. To manually seed that baseline, add a `last_event` block
+under `calendar`:
+
+```yaml
+calendar:
+  show_progress: true
+  url: https://example.com/work.ics
+  refresh_minutes: 15
+  last_event:
+    source_url: https://example.com/work.ics
+    summary: Standup
+    start: 2026-05-01T09:00:00-04:00
+    end: 2026-05-01T09:30:00-04:00
+```
+
+`source_url` must match `calendar.url`, and `start`/`end` should be RFC3339
+timestamps with an offset or `Z`. Invalid or mismatched `last_event` values are
+ignored, and the app falls back to launch time until it sees a completed event.

@@ -98,6 +98,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case tickMsg:
 		m.now = time.Time(msg)
+		m.rememberPastCalendarEvent(m.displayTime())
 		return m, tick()
 	case calendarRefreshMsg:
 		return m, tea.Batch(m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
@@ -106,6 +107,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.calendarEvents = msg.events
+		m.rememberPastCalendarEvent(m.displayTime())
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -210,6 +212,10 @@ func (m Model) handleCalendarURLKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.Type == tea.KeyEnter:
 		before := m.cfg.Calendar
 		m.cfg.Calendar.URL = strings.TrimSpace(m.urlInput.Value())
+		if before.URL != m.cfg.Calendar.URL {
+			m.cfg.Calendar.LastEvent = config.CalendarEventConfig{}
+			m.calendarEvents = nil
+		}
 		m.urlEditor = false
 		m.saveConfig()
 		if m.saveError != "" {
@@ -447,7 +453,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		}
 	}
 	if m.cfg.Calendar.ShowProgress {
-		calendar := render.Calendar(now, secondsWidth, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, calendarOptions(m.calendarEvents, m.startedAt))
+		calendar := render.Calendar(now, secondsWidth, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, calendarOptions(m.calendarEvents, m.startedAt, m.cfg.Calendar, now))
 		if calendar != "" {
 			lines = append(lines, "")
 			lines = append(lines, styles.Seconds.Render(calendar))
@@ -679,12 +685,12 @@ func (m Model) clockText(now time.Time) string {
 	if m.cfg.Time.Format == "12h" {
 		// Use the standard time format for 12h, which handles AM/PM automatically.
 		if m.cfg.Display.InlineSeconds {
-			timeFormat = "3:04:05 PM"
+			timeFormat = "03:04:05 PM"
 		} else {
-			timeFormat = "3:04 PM"
+			timeFormat = "03:04 PM"
 		}
 	}
-	
+
 	// 3. Format the time using the chosen format string
 	formattedTime := now.Format(timeFormat)
 
@@ -1027,8 +1033,8 @@ func workdayOptions(cfg config.WorkdayConfig) render.WorkdayOptions {
 	return render.WorkdayOptions{Schedule: schedule}
 }
 
-func calendarOptions(events []ics.Event, baseline time.Time) render.CalendarOptions {
-	out := make([]render.CalendarEventOptions, 0, len(events))
+func calendarOptions(events []ics.Event, baseline time.Time, cfg config.CalendarConfig, now time.Time) render.CalendarOptions {
+	out := make([]render.CalendarEventOptions, 0, len(events)+1)
 	for _, event := range events {
 		out = append(out, render.CalendarEventOptions{
 			Summary: event.Summary,
@@ -1036,7 +1042,64 @@ func calendarOptions(events []ics.Event, baseline time.Time) render.CalendarOpti
 			End:     event.End,
 		})
 	}
+	if event, ok := rememberedCalendarEvent(cfg, now); ok {
+		out = append(out, render.CalendarEventOptions{
+			Summary: event.Summary,
+			Start:   event.Start,
+			End:     event.End,
+		})
+	}
 	return render.CalendarOptions{Events: out, Baseline: baseline}
+}
+
+func rememberedCalendarEvent(cfg config.CalendarConfig, now time.Time) (ics.Event, bool) {
+	event := cfg.LastEvent
+	if cfg.URL == "" || event.SourceURL != cfg.URL || event.Start.IsZero() || event.End.IsZero() || !event.End.After(event.Start) || event.End.After(now) {
+		return ics.Event{}, false
+	}
+	return ics.Event{Summary: event.Summary, Start: event.Start, End: event.End}, true
+}
+
+func (m *Model) rememberPastCalendarEvent(now time.Time) {
+	if !m.cfg.Calendar.ShowProgress || m.cfg.Calendar.URL == "" {
+		return
+	}
+	event, ok := mostRecentPastCalendarEvent(m.calendarEvents, now)
+	if !ok {
+		return
+	}
+	last := m.cfg.Calendar.LastEvent
+	if last.SourceURL == m.cfg.Calendar.URL && !last.End.IsZero() && !event.End.After(last.End) {
+		return
+	}
+	m.cfg.Calendar.LastEvent = config.CalendarEventConfig{
+		SourceURL: m.cfg.Calendar.URL,
+		Summary:   event.Summary,
+		Start:     event.Start,
+		End:       event.End,
+	}
+	m.saveConfig()
+}
+
+func mostRecentPastCalendarEvent(events []ics.Event, now time.Time) (ics.Event, bool) {
+	var previous ics.Event
+	hasPrevious := false
+	for _, event := range events {
+		if event.Start.IsZero() {
+			continue
+		}
+		if !event.End.After(event.Start) {
+			event.End = event.Start.Add(time.Minute)
+		}
+		if event.End.After(now) {
+			continue
+		}
+		if !hasPrevious || event.End.After(previous.End) {
+			previous = event
+			hasPrevious = true
+		}
+	}
+	return previous, hasPrevious
 }
 
 func workdayScheduleSummary(cfg config.WorkdayConfig) string {
