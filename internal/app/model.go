@@ -667,28 +667,32 @@ func (m *Model) adjustFontScroll() {
 }
 
 func (m Model) clockText(now time.Time) string {
-	timeFormat := "15:04"
+	// 1. Determine base format based on inline seconds
+	var timeFormat string
 	if m.cfg.Display.InlineSeconds {
 		timeFormat = "15:04:05"
+	} else {
+		timeFormat = "15:04"
 	}
-	if m.cfg.Display.BlinkSeparator && now.Second()%2 == 1 {
-		timeFormat = strings.ReplaceAll(timeFormat, ":", string(render.HiddenSeparator))
-	}
+
+	// 2. Handle 12h format special case
 	if m.cfg.Time.Format == "12h" {
+		// Use the standard time format for 12h, which handles AM/PM automatically.
 		if m.cfg.Display.InlineSeconds {
-			timeFormat = "03:04:05 PM"
-			if m.cfg.Display.BlinkSeparator && now.Second()%2 == 1 {
-				timeFormat = strings.ReplaceAll(timeFormat, ":", string(render.HiddenSeparator))
-			}
-			return strings.ToUpper(now.Format(timeFormat))
+			timeFormat = "3:04:05 PM"
+		} else {
+			timeFormat = "3:04 PM"
 		}
-		timeFormat = "03:04 PM"
-		if m.cfg.Display.BlinkSeparator && now.Second()%2 == 1 {
-			timeFormat = strings.ReplaceAll(timeFormat, ":", string(render.HiddenSeparator))
-		}
-		return strings.ToUpper(now.Format(timeFormat))
 	}
-	return now.Format(timeFormat)
+	
+	// 3. Format the time using the chosen format string
+	formattedTime := now.Format(timeFormat)
+
+	// 4. Apply separator blinking logic
+	if m.cfg.Display.BlinkSeparator && now.Second()%2 == 1 {
+		return strings.ReplaceAll(formattedTime, ":", string(render.HiddenSeparator))
+	}
+	return formattedTime
 }
 
 func (m Model) settingsView(styles theme.Stylesheet) string {
