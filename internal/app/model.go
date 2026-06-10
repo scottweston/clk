@@ -425,6 +425,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		Style:           m.cfg.Display.SecondsStyle,
 		Width:           secondsWidth,
 		NerdFont:        m.cfg.UI.NerdFont,
+		Emoji:           m.cfg.UI.Emoji,
 		Background:      background,
 		Accent:          theme.Accent(theme.Lookup(m.cfg.Theme.Name), m.cfg.Theme.Accent),
 		Foreground:      theme.Lookup(m.cfg.Theme.Name).Foreground,
@@ -443,6 +444,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 			Style:           "workday",
 			Width:           secondsWidth,
 			NerdFont:        m.cfg.UI.NerdFont,
+			Emoji:           m.cfg.UI.Emoji,
 			Progress:        m.progressView,
 			WorkdayProgress: m.workdayProgressView,
 			Workday:         workdayOptions(m.cfg.Workday),
@@ -453,7 +455,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		}
 	}
 	if m.cfg.Calendar.ShowProgress {
-		calendar := render.Calendar(now, secondsWidth, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, calendarOptions(m.calendarEvents, m.startedAt, m.cfg.Calendar, now))
+		calendar := render.Calendar(now, secondsWidth, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, calendarOptions(m.calendarEvents, m.startedAt, m.cfg.Calendar, now, m.cfg.UI.Emoji))
 		if calendar != "" {
 			lines = append(lines, "")
 			lines = append(lines, styles.Seconds.Render(calendar))
@@ -884,6 +886,7 @@ func (m Model) settingItems() []settingItem {
 		submenuItem("Work schedule", func(c config.Config) string { return workdayScheduleSummary(c.Workday) }, "workdays"),
 		cycleItem("Alignment", func(c config.Config) string { return c.Display.Alignment }, func(v string, c *config.Config) { c.Display.Alignment = v }, config.Alignments),
 		toggleItem("Nerd Font", func(c config.Config) bool { return c.UI.NerdFont }, func(v bool, c *config.Config) { c.UI.NerdFont = v }),
+		toggleItem("Emoji", func(c config.Config) bool { return c.UI.Emoji }, func(v bool, c *config.Config) { c.UI.Emoji = v }),
 	)
 	return items
 }
@@ -1033,7 +1036,7 @@ func workdayOptions(cfg config.WorkdayConfig) render.WorkdayOptions {
 	return render.WorkdayOptions{Schedule: schedule}
 }
 
-func calendarOptions(events []ics.Event, baseline time.Time, cfg config.CalendarConfig, now time.Time) render.CalendarOptions {
+func calendarOptions(events []ics.Event, baseline time.Time, cfg config.CalendarConfig, now time.Time, emoji bool) render.CalendarOptions {
 	out := make([]render.CalendarEventOptions, 0, len(events)+1)
 	for _, event := range events {
 		out = append(out, render.CalendarEventOptions{
@@ -1049,7 +1052,7 @@ func calendarOptions(events []ics.Event, baseline time.Time, cfg config.Calendar
 			End:     event.End,
 		})
 	}
-	return render.CalendarOptions{Events: out, Baseline: baseline}
+	return render.CalendarOptions{Events: out, Baseline: baseline, Emoji: emoji}
 }
 
 func rememberedCalendarEvent(cfg config.CalendarConfig, now time.Time) (ics.Event, bool) {

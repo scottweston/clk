@@ -29,7 +29,9 @@ selector to choose a discovered font.
 Workday progress uses configurable start/end times and a `Work days` checkbox
 submenu in settings. Workday and ICS calendar progress bars can be enabled
 independently in settings; set the `ICS URL` value to an HTTP(S) `.ics` feed for
-calendar countdown/countup progress.
+calendar countdown/countup progress. Progress labels use compact Unicode
+symbols by default, with an `Emoji` setting and `ui.emoji` config flag for emoji
+symbols. Off-work emoji rotate daily between beach, palm, and home symbols.
 
 The calendar countdown normally uses the most recent completed event from the
 feed as its baseline, and remembers that event in config in case the feed later

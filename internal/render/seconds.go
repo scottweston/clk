@@ -6,7 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 type SecondsOptions struct {
@@ -14,6 +15,7 @@ type SecondsOptions struct {
 	Style           string
 	Width           int
 	NerdFont        bool
+	Emoji           bool
 	Background      string
 	Accent          string
 	Foreground      string
@@ -36,6 +38,7 @@ type WorkdayDayOptions struct {
 type CalendarOptions struct {
 	Events   []CalendarEventOptions
 	Baseline time.Time
+	Emoji    bool
 }
 
 type CalendarEventOptions struct {
@@ -50,6 +53,8 @@ const (
 	ProgressDirectionUp   ProgressDirection = "up"
 	ProgressDirectionDown ProgressDirection = "down"
 )
+
+const minimumProgressWidth = 12
 
 func Seconds(now time.Time, style string, width int, nerdFont bool) string {
 	return SecondsStyled(SecondsOptions{
@@ -83,7 +88,7 @@ func SecondsStyled(opts SecondsOptions) string {
 	case "pomodoro":
 		return pomodoro(now, opts.Width, opts.Progress)
 	case "workday":
-		return workday(now, opts.Width, opts.Progress, opts.WorkdayProgress, opts.NerdFont, opts.Workday)
+		return workday(now, opts.Width, opts.Progress, opts.WorkdayProgress, opts.NerdFont, opts.Emoji, opts.Workday)
 	default:
 		return progressView(opts.Progress, progress, opts.Width)
 	}
@@ -97,8 +102,8 @@ func progressBar(progress float64, width int) string {
 }
 
 func normalizeBarWidth(width int) int {
-	if width < 12 {
-		return 12
+	if width < minimumProgressWidth {
+		return minimumProgressWidth
 	}
 	return width
 }
@@ -107,7 +112,7 @@ func pomodoro(now time.Time, width int, progress func(float64, int) string) stri
 	info := PomodoroProgress(now)
 	remaining := fmt.Sprintf("%02d:%02d", int(info.Remaining.Minutes()), int(info.Remaining.Seconds())%60)
 	label := info.Label + " " + remaining
-	barWidth := width - utf8.RuneCountInString(label) - 2
+	barWidth := width - lipgloss.Width(label) - 2
 	if barWidth < 1 {
 		barWidth = 1
 	}
@@ -154,11 +159,11 @@ func PomodoroProgress(now time.Time) ProgressInfo {
 	}
 }
 
-func workday(now time.Time, width int, progress func(float64, int) string, directionalProgress func(float64, int, ProgressDirection) string, nerdFont bool, opts WorkdayOptions) string {
+func workday(now time.Time, width int, progress func(float64, int) string, directionalProgress func(float64, int, ProgressDirection) string, nerdFont, emoji bool, opts WorkdayOptions) string {
 	info := WorkdayProgress(now, opts)
 	remaining := formatHoursMinutesCeil(info.Remaining)
-	label := fmt.Sprintf("%s %s", info.Label, remaining)
-	barWidth := width - utf8.RuneCountInString(label) - 2
+	label := fmt.Sprintf("%s %s", statusSymbol(info.Label, emoji, now), remaining)
+	barWidth := width - lipgloss.Width(label) - 2
 	if barWidth < 1 {
 		barWidth = 1
 	}
@@ -176,8 +181,8 @@ func Calendar(now time.Time, width int, progress func(float64, int) string, dire
 		return ""
 	}
 	remaining := formatHoursMinutesCeil(info.Remaining)
-	label := calendarLabel(info.Label, remaining, width)
-	barWidth := width - utf8.RuneCountInString(label) - 2
+	label := calendarLabel(info.Label, remaining, width, opts.Emoji)
+	barWidth := width - lipgloss.Width(label) - 2
 	if barWidth < 1 {
 		barWidth = 1
 	}
@@ -189,36 +194,100 @@ func Calendar(now time.Time, width int, progress func(float64, int) string, dire
 	return label + " " + bar
 }
 
-func calendarLabel(summary, remaining string, width int) string {
+func calendarLabel(summary, remaining string, width int, emoji bool) string {
 	summary = strings.TrimSpace(summary)
-	if summary == "" {
-		summary = "event"
-	}
-	prefix := "event"
-	baseRunes := utf8.RuneCountInString(prefix) + 1 + utf8.RuneCountInString(remaining)
-	available := width - normalizeBarWidth(12) - 2 - baseRunes - 1
+	prefix := statusSymbol("event", emoji, time.Time{})
+	base := fmt.Sprintf("%s %s", prefix, remaining)
+	baseWidth := lipgloss.Width(base)
+	available := width - minimumProgressWidth - 2 - baseWidth - 1
 	if available < 0 {
 		available = 0
 	}
-	if available == 0 {
-		return fmt.Sprintf("%s %s", prefix, remaining)
+	if summary != "" {
+		summaryLimit := width / 3
+		if summaryLimit < available {
+			available = summaryLimit
+		}
 	}
-	summary = truncateRunes(summary, available)
+	if summary == "" || available <= 0 {
+		return base
+	}
+	summary = truncateCells(summary, available)
+	if summary == "" {
+		return base
+	}
 	return fmt.Sprintf("%s %s %s", prefix, summary, remaining)
 }
 
-func truncateRunes(value string, maxRunes int) string {
-	if maxRunes <= 0 {
+func statusSymbol(kind string, emoji bool, now time.Time) string {
+	if emoji {
+		switch kind {
+		case "workday":
+			return "💼"
+		case "off":
+			return offWorkEmoji(now)
+		case "event":
+			return "📅"
+		}
+	}
+	switch kind {
+	case "workday":
+		return "☼"
+	case "off":
+		return "☾"
+	case "event":
+		return "◇"
+	default:
+		return kind
+	}
+}
+
+func offWorkEmoji(now time.Time) string {
+	choices := []string{"🏖️", "🌴", "🏡"}
+	if now.IsZero() {
+		return choices[0]
+	}
+	return choices[(now.Year()+now.YearDay())%len(choices)]
+}
+
+func truncateCells(value string, maxWidth int) string {
+	value = strings.TrimSpace(value)
+	if maxWidth <= 0 {
 		return ""
 	}
-	if utf8.RuneCountInString(value) <= maxRunes {
+	if lipgloss.Width(value) <= maxWidth {
 		return value
 	}
-	if maxRunes <= 3 {
-		return strings.Repeat(".", maxRunes)
+	ellipsis := "…"
+	ellipsisWidth := lipgloss.Width(ellipsis)
+	if maxWidth < ellipsisWidth {
+		return ""
 	}
-	runes := []rune(value)
-	return string(runes[:maxRunes-3]) + "..."
+	if maxWidth == ellipsisWidth {
+		return ellipsis
+	}
+	limit := maxWidth - ellipsisWidth
+	var b strings.Builder
+	used := 0
+	for _, r := range value {
+		part := string(r)
+		cellWidth := lipgloss.Width(part)
+		if cellWidth == 0 {
+			if b.Len() > 0 {
+				b.WriteRune(r)
+			}
+			continue
+		}
+		if used+cellWidth > limit {
+			break
+		}
+		b.WriteRune(r)
+		used += cellWidth
+	}
+	if b.Len() == 0 {
+		return ellipsis
+	}
+	return b.String() + ellipsis
 }
 
 func formatHoursMinutesCeil(d time.Duration) string {
@@ -350,9 +419,7 @@ func calendarEvents(events []CalendarEventOptions) []CalendarEventOptions {
 		if event.Start.IsZero() {
 			continue
 		}
-		if event.Summary == "" {
-			event.Summary = "event"
-		}
+		event.Summary = strings.TrimSpace(event.Summary)
 		if !event.End.After(event.Start) {
 			event.End = event.Start.Add(time.Minute)
 		}

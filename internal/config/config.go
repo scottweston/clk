@@ -81,6 +81,7 @@ type ThemeConfig struct {
 
 type UIConfig struct {
 	NerdFont bool `yaml:"nerd_font"`
+	Emoji    bool `yaml:"emoji"`
 }
 
 type Manager struct {
@@ -124,7 +125,7 @@ func Default() Config {
 			Name:   "tokyo-night",
 			Accent: "cyan",
 		},
-		UI: UIConfig{NerdFont: false},
+		UI: UIConfig{NerdFont: false, Emoji: false},
 	}
 }
 

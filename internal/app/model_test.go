@@ -79,7 +79,7 @@ func TestProgressBackgroundSettingsChangeNoConfig(t *testing.T) {
 
 func TestSettingsExposeScheduleProgressControls(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
-	for _, label := range []string{"Workday bar", "ICS bar", "ICS URL"} {
+	for _, label := range []string{"Workday bar", "ICS bar", "ICS URL", "Emoji"} {
 		if !hasSettingItem(m, label) {
 			t.Fatalf("expected setting %q", label)
 		}
@@ -574,7 +574,7 @@ func TestWorkdayAndCalendarProgressBarsCanRenderTogether(t *testing.T) {
 	}
 
 	out := m.View()
-	if !strings.Contains(out, "workday") || !strings.Contains(out, "Planning") {
+	if !strings.Contains(out, "☼") || !strings.Contains(out, "Planning") {
 		t.Fatalf("expected workday and calendar progress bars, got %q", out)
 	}
 }

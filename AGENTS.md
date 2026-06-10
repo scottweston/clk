@@ -47,6 +47,7 @@ Current config fields include:
 - `workday.days`: active workdays using `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`; configured through the `Work days` checkbox submenu.
 - `theme.name` and `theme.accent`: built-in theme palette and accent color.
 - `ui.nerd_font`: enables Nerd Font-specific glyph choices where available.
+- `ui.emoji`: switches compact progress labels from Unicode symbols to emoji symbols.
 
 Normalization is intentionally conservative. Unknown enum values fall back to defaults. Old configs with `seconds_style: inline` are migrated to `inline_seconds: true` plus `seconds_style: hidden`.
 
@@ -61,6 +62,8 @@ Normalization is intentionally conservative. Unknown enum values fall back to de
 - Third-party Bubbles output in overlays should be wrapped with `fillBackground` before and after panel rendering so internal padding and short lines inherit the active theme background. For Bubbles list menus, use the project-owned `settingsDelegate`; the default delegate emits internal ANSI resets that can leak terminal background.
 - Bubble Progress seconds renderers should use the native Bubbles `progress.Model` flow with theme gradient colors; avoid hand-building the bar unless Bubbles cannot support a required behavior.
 - Workday progress is 0% before the configured start time, fills to 100% between start and end, remains 100% after the end time, and resets to 0% on the next non-completed workday/off day.
+- Workday, off-day, and ICS event progress rows use compact symbols instead of English status words. Emoji mode uses emoji symbols; non-emoji mode uses plain Unicode symbols. Off-work emoji rotate daily between beach, palm, and home symbols.
+- ICS event titles should be truncated by terminal cell width and should use at most one third of the available progress-row width so the progress bar remains visible.
 
 ## Testing
 

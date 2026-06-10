@@ -29,6 +29,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Calendar.ShowProgress || cfg.Calendar.URL != "" || cfg.Calendar.RefreshMinutes != 15 {
 		t.Fatalf("unexpected default calendar config: %+v", cfg.Calendar)
 	}
+	if cfg.UI.Emoji {
+		t.Fatal("expected emoji rendering to default to off")
+	}
 }
 
 func TestSaveAndLoadConfig(t *testing.T) {
@@ -45,6 +48,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		End:       time.Date(2026, 5, 1, 9, 30, 0, 0, time.UTC),
 	}
 	cfg.UI.NerdFont = true
+	cfg.UI.Emoji = true
 
 	if err := manager.Save(cfg); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -53,7 +57,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if loaded.Display.DigitStyle != "braille" || !loaded.UI.NerdFont {
+	if loaded.Display.DigitStyle != "braille" || !loaded.UI.NerdFont || !loaded.UI.Emoji {
 		t.Fatalf("loaded config mismatch: %+v", loaded)
 	}
 	if loaded.Calendar.LastEvent.Summary != "Standup" || !loaded.Calendar.LastEvent.End.Equal(cfg.Calendar.LastEvent.End) {
@@ -187,6 +191,7 @@ theme:
     accent: cyan
 ui:
     nerd_font: false
+    emoji: false
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("write config: %v", err)

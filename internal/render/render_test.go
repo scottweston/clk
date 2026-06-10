@@ -305,12 +305,12 @@ func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
 	}
 
 	opts.Time = time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 00:30") || !strings.Contains(got, "[") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☼ 00:30") || strings.Contains(got, "workday") || !strings.Contains(got, "[") {
 		t.Fatalf("expected pre-workday with bar, got %q", got)
 	}
 
 	opts.Time = time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 04:00") || !strings.Contains(got, "[") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☼ 04:00") || strings.Contains(got, "workday") || !strings.Contains(got, "[") {
 		t.Fatalf("expected mid-workday with bar, got %q", got)
 	}
 
@@ -318,20 +318,56 @@ func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
 	friday := opts.Workday.Schedule["fri"]
 	friday.EndTime = "18:00"
 	opts.Workday.Schedule["fri"] = friday
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 08:52") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☼ 08:52") {
 		t.Fatalf("expected partial remaining minute to round up, got %q", got)
 	}
 	friday.EndTime = "17:00"
 	opts.Workday.Schedule["fri"] = friday
 
 	opts.Time = time.Date(2026, 5, 1, 18, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 63:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☼ 63:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
 		t.Fatalf("expected after-workday bar to drain toward next start, got %q", got)
 	}
 
 	opts.Time = time.Date(2026, 5, 2, 13, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "off 44:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☾ 44:00") || strings.Contains(got, "off") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
 		t.Fatalf("expected off day bar to drain toward next start, got %q", got)
+	}
+}
+
+func TestWorkdayCanRenderEmojiLabels(t *testing.T) {
+	opts := SecondsOptions{
+		Style:   "workday",
+		Width:   48,
+		Emoji:   true,
+		Workday: testWorkdayOptions(),
+	}
+
+	opts.Time = time.Date(2026, 5, 1, 13, 0, 0, 0, time.Local)
+	if got := SecondsStyled(opts); !strings.Contains(got, "💼 04:00") {
+		t.Fatalf("expected workday emoji, got %q", got)
+	}
+
+	opts.Time = time.Date(2026, 5, 2, 13, 0, 0, 0, time.Local)
+	if got := SecondsStyled(opts); !strings.Contains(got, "🏖️ 44:00") {
+		t.Fatalf("expected off-day emoji, got %q", got)
+	}
+}
+
+func TestOffWorkEmojiRotatesByDate(t *testing.T) {
+	cases := []struct {
+		now  time.Time
+		want string
+	}{
+		{time.Date(2026, 5, 2, 13, 0, 0, 0, time.Local), "🏖️"},
+		{time.Date(2026, 5, 3, 13, 0, 0, 0, time.Local), "🌴"},
+		{time.Date(2026, 5, 4, 13, 0, 0, 0, time.Local), "🏡"},
+	}
+
+	for _, tc := range cases {
+		if got := offWorkEmoji(tc.now); got != tc.want {
+			t.Fatalf("expected %s for %s, got %s", tc.want, tc.now.Format("2006-01-02"), got)
+		}
 	}
 }
 
@@ -347,12 +383,12 @@ func TestWorkdayUsesPerDayScheduleBoundaries(t *testing.T) {
 	opts.Workday.Schedule["mon"] = monday
 
 	opts.Time = time.Date(2026, 5, 4, 11, 30, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 00:30") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☼ 00:30") {
 		t.Fatalf("expected monday start boundary, got %q", got)
 	}
 
 	opts.Time = time.Date(2026, 5, 4, 13, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "workday 01:00") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☼ 01:00") {
 		t.Fatalf("expected monday end boundary, got %q", got)
 	}
 }
@@ -367,13 +403,70 @@ func TestCalendarRendersUpcomingAndActiveEvents(t *testing.T) {
 	}}
 
 	before := Calendar(time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local), 48, nil, nil, false, opts)
-	if !strings.Contains(before, "event Standup 00:30") || !strings.Contains(before, "[") {
+	if !strings.Contains(before, "◇ Standup 00:30") || strings.Contains(before, "event") || !strings.Contains(before, "[") {
 		t.Fatalf("expected upcoming calendar event, got %q", before)
 	}
 
 	during := Calendar(time.Date(2026, 5, 1, 9, 15, 0, 0, time.Local), 48, nil, nil, false, opts)
-	if !strings.Contains(during, "event Standup 00:15") || !strings.Contains(during, "[") {
+	if !strings.Contains(during, "◇ Standup 00:15") || strings.Contains(during, "event") || !strings.Contains(during, "[") {
 		t.Fatalf("expected active calendar event, got %q", during)
+	}
+}
+
+func TestCalendarCanRenderEmojiLabel(t *testing.T) {
+	opts := CalendarOptions{
+		Emoji: true,
+		Events: []CalendarEventOptions{
+			{
+				Summary: "Standup",
+				Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 5, 1, 9, 30, 0, 0, time.Local),
+			},
+		},
+	}
+
+	got := Calendar(time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local), 48, nil, nil, false, opts)
+	if !strings.Contains(got, "📅 Standup 00:30") {
+		t.Fatalf("expected calendar emoji, got %q", got)
+	}
+}
+
+func TestCalendarEmptySummaryDoesNotRenderEventText(t *testing.T) {
+	opts := CalendarOptions{Events: []CalendarEventOptions{
+		{
+			Start: time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+			End:   time.Date(2026, 5, 1, 9, 30, 0, 0, time.Local),
+		},
+	}}
+
+	got := Calendar(time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local), 48, nil, nil, false, opts)
+	if !strings.Contains(got, "◇ 00:30") || strings.Contains(got, "event") {
+		t.Fatalf("expected symbol-only empty event summary, got %q", got)
+	}
+}
+
+func TestCalendarTitleUsesAtMostOneThirdWidth(t *testing.T) {
+	const width = 60
+	opts := CalendarOptions{Events: []CalendarEventOptions{
+		{
+			Summary: "VeryLongMeetingTitleThatWouldEatTheProgressBar",
+			Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 9, 30, 0, 0, time.Local),
+		},
+	}}
+
+	got := Calendar(time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local), width, nil, nil, false, opts)
+	label, _, ok := strings.Cut(got, " [")
+	if !ok {
+		t.Fatalf("expected calendar progress bar, got %q", got)
+	}
+	summary := strings.TrimPrefix(label, "◇ ")
+	summary = strings.TrimSuffix(summary, " 00:30")
+	if lipgloss.Width(summary) > width/3 {
+		t.Fatalf("expected summary width <= %d, got %d in %q", width/3, lipgloss.Width(summary), got)
+	}
+	if !strings.Contains(got, "…") || !strings.Contains(got, "[") {
+		t.Fatalf("expected truncated event with progress bar, got %q", got)
 	}
 }
 
