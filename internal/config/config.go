@@ -61,10 +61,17 @@ type WorkdayDayConfig struct {
 }
 
 type CalendarConfig struct {
-	ShowProgress   bool                `yaml:"show_progress"`
-	URL            string              `yaml:"url"`
-	RefreshMinutes int                 `yaml:"refresh_minutes"`
-	LastEvent      CalendarEventConfig `yaml:"last_event,omitempty"`
+	ShowProgress   bool                   `yaml:"show_progress"`
+	URL            string                 `yaml:"url,omitempty"`
+	Sources        []CalendarSourceConfig `yaml:"sources,omitempty"`
+	Mode           string                 `yaml:"mode"`
+	RefreshMinutes int                    `yaml:"refresh_minutes"`
+	LastEvent      CalendarEventConfig    `yaml:"last_event,omitempty"`
+}
+
+type CalendarSourceConfig struct {
+	URL       string              `yaml:"url"`
+	LastEvent CalendarEventConfig `yaml:"last_event,omitempty"`
 }
 
 type CalendarEventConfig struct {
@@ -119,6 +126,7 @@ func Default() Config {
 		Calendar: CalendarConfig{
 			ShowProgress:   false,
 			URL:            "",
+			Mode:           "merged",
 			RefreshMinutes: 15,
 		},
 		Theme: ThemeConfig{
@@ -287,6 +295,8 @@ var SecondsStyles = []string{
 
 var ProgressEmptyBackgrounds = []string{"theme", "accent", "muted", "foreground", "warning"}
 
+var CalendarModes = []string{"merged", "split"}
+
 var Alignments = []string{"left", "center", "right"}
 
 var TimeChoices = []string{
@@ -354,6 +364,8 @@ func (c *CalendarConfig) UnmarshalYAML(value *yaml.Node) error {
 	if err := rejectUnknownMappingFields(value, map[string]bool{
 		"show_progress":   true,
 		"url":             true,
+		"sources":         true,
+		"mode":            true,
 		"refresh_minutes": true,
 		"last_event":      true,
 	}); err != nil {
@@ -365,6 +377,22 @@ func (c *CalendarConfig) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 	*c = CalendarConfig(raw)
+	return nil
+}
+
+func (s *CalendarSourceConfig) UnmarshalYAML(value *yaml.Node) error {
+	if err := rejectUnknownMappingFields(value, map[string]bool{
+		"url":        true,
+		"last_event": true,
+	}); err != nil {
+		return err
+	}
+	type rawCalendarSourceConfig CalendarSourceConfig
+	var raw rawCalendarSourceConfig
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*s = CalendarSourceConfig(raw)
 	return nil
 }
 
@@ -437,21 +465,69 @@ func (w *WorkdayConfig) Normalize() {
 
 func (c *CalendarConfig) Normalize() {
 	c.URL = strings.TrimSpace(c.URL)
+	if !contains(CalendarModes, c.Mode) {
+		c.Mode = "merged"
+	}
 	if c.RefreshMinutes <= 0 {
 		c.RefreshMinutes = 15
 	}
 	if c.RefreshMinutes > 24*60 {
 		c.RefreshMinutes = 24 * 60
 	}
-	c.LastEvent.Normalize(c.URL)
+	c.Sources = normalizeCalendarSources(c.URL, c.LastEvent, c.Sources)
+	c.URL = ""
+	c.LastEvent = CalendarEventConfig{}
+}
+
+func (s *CalendarSourceConfig) Normalize() {
+	s.URL = strings.TrimSpace(s.URL)
+	s.LastEvent.Normalize(s.URL)
 }
 
 func (e *CalendarEventConfig) Normalize(sourceURL string) {
+	sourceURL = strings.TrimSpace(sourceURL)
 	e.SourceURL = strings.TrimSpace(e.SourceURL)
 	e.Summary = strings.TrimSpace(e.Summary)
+	if e.SourceURL == "" {
+		e.SourceURL = sourceURL
+	}
 	if sourceURL == "" || e.SourceURL == "" || e.SourceURL != sourceURL || e.Start.IsZero() || e.End.IsZero() || !e.End.After(e.Start) {
 		*e = CalendarEventConfig{}
 	}
+}
+
+func normalizeCalendarSources(legacyURL string, legacyLastEvent CalendarEventConfig, sources []CalendarSourceConfig) []CalendarSourceConfig {
+	seen := make(map[string]bool, len(sources)+1)
+	index := make(map[string]int, len(sources)+1)
+	out := make([]CalendarSourceConfig, 0, len(sources)+1)
+	for _, source := range sources {
+		source.Normalize()
+		if source.URL == "" || seen[source.URL] {
+			continue
+		}
+		index[source.URL] = len(out)
+		out = append(out, source)
+		seen[source.URL] = true
+	}
+	if legacyURL != "" {
+		source := CalendarSourceConfig{URL: legacyURL, LastEvent: legacyLastEvent}
+		source.Normalize()
+		if source.URL == "" {
+			return out
+		}
+		if idx, ok := index[source.URL]; ok {
+			if calendarEventEmpty(out[idx].LastEvent) && !calendarEventEmpty(source.LastEvent) {
+				out[idx].LastEvent = source.LastEvent
+			}
+		} else {
+			out = append(out, source)
+		}
+	}
+	return out
+}
+
+func calendarEventEmpty(event CalendarEventConfig) bool {
+	return event.SourceURL == "" && event.Summary == "" && event.Start.IsZero() && event.End.IsZero()
 }
 
 func defaultWorkdaySchedule() map[string]WorkdayDayConfig {

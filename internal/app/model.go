@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lucasb-eyer/go-colorful"
@@ -44,9 +44,9 @@ type Model struct {
 	fontCursor       int
 	fontScrollOffset int
 	urlEditor        bool
-	urlInput         textinput.Model
+	urlInput         textarea.Model
 	saveError        string
-	calendarEvents   []ics.Event
+	calendarEvents   map[string][]ics.Event
 	help             help.Model
 	progress         progress.Model
 	keys             keyMap
@@ -74,16 +74,17 @@ func New(cfg config.Config, manager config.Manager) Model {
 	cfg.Normalize()
 	now := time.Now()
 	return Model{
-		cfg:        cfg,
-		manager:    manager,
-		now:        now,
-		startedAt:  now,
-		urlInput:   newCalendarURLInput(),
-		help:       help.New(),
-		progress:   newProgressModel(cfg),
-		keys:       keys,
-		themeName:  cfg.Theme.Name,
-		accentName: cfg.Theme.Accent,
+		cfg:            cfg,
+		manager:        manager,
+		now:            now,
+		startedAt:      now,
+		urlInput:       newCalendarURLInput(),
+		calendarEvents: make(map[string][]ics.Event),
+		help:           help.New(),
+		progress:       newProgressModel(cfg),
+		keys:           keys,
+		themeName:      cfg.Theme.Name,
+		accentName:     cfg.Theme.Accent,
 	}
 }
 
@@ -103,10 +104,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case calendarRefreshMsg:
 		return m, tea.Batch(m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
 	case calendarFetchMsg:
-		if msg.url != m.cfg.Calendar.URL {
+		if !calendarHasSource(m.cfg.Calendar, msg.url) {
 			return m, nil
 		}
-		m.calendarEvents = msg.events
+		if m.calendarEvents == nil {
+			m.calendarEvents = make(map[string][]ics.Event)
+		}
+		m.calendarEvents[msg.url] = msg.events
 		m.rememberPastCalendarEvent(m.displayTime())
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -209,13 +213,13 @@ func (m Model) handleCalendarURLKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Back):
 		m.urlEditor = false
 		return m, nil
-	case msg.Type == tea.KeyEnter:
+	case msg.Type == tea.KeyCtrlS:
 		before := m.cfg.Calendar
-		m.cfg.Calendar.URL = strings.TrimSpace(m.urlInput.Value())
-		if before.URL != m.cfg.Calendar.URL {
-			m.cfg.Calendar.LastEvent = config.CalendarEventConfig{}
-			m.calendarEvents = nil
-		}
+		m.cfg.Calendar.URL = ""
+		m.cfg.Calendar.LastEvent = config.CalendarEventConfig{}
+		m.cfg.Calendar.Sources = calendarSourcesFromText(m.urlInput.Value(), before.Sources)
+		m.cfg.Normalize()
+		m.pruneCalendarEvents()
 		m.urlEditor = false
 		m.saveConfig()
 		if m.saveError != "" {
@@ -286,8 +290,8 @@ func (m *Model) openFontPicker() {
 
 func (m *Model) openCalendarURLEditor() {
 	m.urlInput = newCalendarURLInput()
-	m.urlInput.SetValue(m.cfg.Calendar.URL)
-	m.urlInput.Focus()
+	m.urlInput.SetValue(calendarSourcesText(m.cfg.Calendar))
+	_ = m.urlInput.Focus()
 	m.urlEditor = true
 }
 
@@ -455,7 +459,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		}
 	}
 	if m.cfg.Calendar.ShowProgress {
-		calendar := render.Calendar(now, secondsWidth, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, calendarOptions(m.calendarEvents, m.startedAt, m.cfg.Calendar, now, m.cfg.UI.Emoji))
+		calendar := m.calendarProgressView(now, secondsWidth)
 		if calendar != "" {
 			lines = append(lines, "")
 			lines = append(lines, styles.Seconds.Render(calendar))
@@ -744,10 +748,10 @@ func (m Model) settingsView(styles theme.Stylesheet) string {
 
 func (m Model) calendarURLView(styles theme.Stylesheet) string {
 	rows := []string{
-		styles.Muted.Render("ICS URL"),
+		styles.Muted.Render("ICS URLs"),
 		m.urlInput.View(),
 		"",
-		styles.Muted.Render("enter saves • esc returns"),
+		styles.Muted.Render("one URL per line • ctrl+s saves • esc returns"),
 	}
 	return styles.Panel.Render(strings.Join(rows, "\n"))
 }
@@ -882,7 +886,8 @@ func (m Model) settingItems() []settingItem {
 		cycleItem("Bar bg", func(c config.Config) string { return c.Display.ProgressEmptyBackground }, func(v string, c *config.Config) { c.Display.ProgressEmptyBackground = v }, config.ProgressEmptyBackgrounds),
 		toggleItem("Workday bar", func(c config.Config) bool { return c.Workday.ShowProgress }, func(v bool, c *config.Config) { c.Workday.ShowProgress = v }),
 		toggleItem("ICS bar", func(c config.Config) bool { return c.Calendar.ShowProgress }, func(v bool, c *config.Config) { c.Calendar.ShowProgress = v }),
-		submenuItem("ICS URL", func(c config.Config) string { return calendarURLSummary(c.Calendar) }, "calendar_url"),
+		cycleItem("ICS mode", func(c config.Config) string { return c.Calendar.Mode }, func(v string, c *config.Config) { c.Calendar.Mode = v }, config.CalendarModes),
+		submenuItem("ICS URLs", func(c config.Config) string { return calendarURLSummary(c.Calendar) }, "calendar_url"),
 		submenuItem("Work schedule", func(c config.Config) string { return workdayScheduleSummary(c.Workday) }, "workdays"),
 		cycleItem("Alignment", func(c config.Config) string { return c.Display.Alignment }, func(v string, c *config.Config) { c.Display.Alignment = v }, config.Alignments),
 		toggleItem("Nerd Font", func(c config.Config) bool { return c.UI.NerdFont }, func(v bool, c *config.Config) { c.UI.NerdFont = v }),
@@ -1036,7 +1041,26 @@ func workdayOptions(cfg config.WorkdayConfig) render.WorkdayOptions {
 	return render.WorkdayOptions{Schedule: schedule}
 }
 
-func calendarOptions(events []ics.Event, baseline time.Time, cfg config.CalendarConfig, now time.Time, emoji bool) render.CalendarOptions {
+func (m Model) calendarProgressView(now time.Time, width int) string {
+	if m.cfg.Calendar.Mode == "split" {
+		rows := make([]string, 0, len(m.cfg.Calendar.Sources))
+		for _, source := range m.cfg.Calendar.Sources {
+			row := render.Calendar(now, width, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, calendarOptions(m.calendarEvents[source.URL], m.startedAt, source, now, m.cfg.UI.Emoji))
+			if row != "" {
+				rows = append(rows, row)
+			}
+		}
+		return strings.Join(rows, "\n\n")
+	}
+
+	events := make([]ics.Event, 0)
+	for _, source := range m.cfg.Calendar.Sources {
+		events = append(events, m.calendarEvents[source.URL]...)
+	}
+	return render.Calendar(now, width, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, mergedCalendarOptions(events, m.startedAt, m.cfg.Calendar, now, m.cfg.UI.Emoji))
+}
+
+func calendarOptions(events []ics.Event, baseline time.Time, source config.CalendarSourceConfig, now time.Time, emoji bool) render.CalendarOptions {
 	out := make([]render.CalendarEventOptions, 0, len(events)+1)
 	for _, event := range events {
 		out = append(out, render.CalendarEventOptions{
@@ -1045,7 +1069,7 @@ func calendarOptions(events []ics.Event, baseline time.Time, cfg config.Calendar
 			End:     event.End,
 		})
 	}
-	if event, ok := rememberedCalendarEvent(cfg, now); ok {
+	if event, ok := rememberedCalendarEvent(source, now); ok {
 		out = append(out, render.CalendarEventOptions{
 			Summary: event.Summary,
 			Start:   event.Start,
@@ -1055,33 +1079,60 @@ func calendarOptions(events []ics.Event, baseline time.Time, cfg config.Calendar
 	return render.CalendarOptions{Events: out, Baseline: baseline, Emoji: emoji}
 }
 
-func rememberedCalendarEvent(cfg config.CalendarConfig, now time.Time) (ics.Event, bool) {
-	event := cfg.LastEvent
-	if cfg.URL == "" || event.SourceURL != cfg.URL || event.Start.IsZero() || event.End.IsZero() || !event.End.After(event.Start) || event.End.After(now) {
+func mergedCalendarOptions(events []ics.Event, baseline time.Time, cfg config.CalendarConfig, now time.Time, emoji bool) render.CalendarOptions {
+	out := make([]render.CalendarEventOptions, 0, len(events)+len(cfg.Sources))
+	for _, event := range events {
+		out = append(out, render.CalendarEventOptions{
+			Summary: event.Summary,
+			Start:   event.Start,
+			End:     event.End,
+		})
+	}
+	for _, source := range cfg.Sources {
+		if event, ok := rememberedCalendarEvent(source, now); ok {
+			out = append(out, render.CalendarEventOptions{
+				Summary: event.Summary,
+				Start:   event.Start,
+				End:     event.End,
+			})
+		}
+	}
+	return render.CalendarOptions{Events: out, Baseline: baseline, Emoji: emoji}
+}
+
+func rememberedCalendarEvent(source config.CalendarSourceConfig, now time.Time) (ics.Event, bool) {
+	event := source.LastEvent
+	if source.URL == "" || event.SourceURL != source.URL || event.Start.IsZero() || event.End.IsZero() || !event.End.After(event.Start) || event.End.After(now) {
 		return ics.Event{}, false
 	}
 	return ics.Event{Summary: event.Summary, Start: event.Start, End: event.End}, true
 }
 
 func (m *Model) rememberPastCalendarEvent(now time.Time) {
-	if !m.cfg.Calendar.ShowProgress || m.cfg.Calendar.URL == "" {
+	if !m.cfg.Calendar.ShowProgress || len(m.cfg.Calendar.Sources) == 0 {
 		return
 	}
-	event, ok := mostRecentPastCalendarEvent(m.calendarEvents, now)
-	if !ok {
-		return
+	changed := false
+	for i, source := range m.cfg.Calendar.Sources {
+		event, ok := mostRecentPastCalendarEvent(m.calendarEvents[source.URL], now)
+		if !ok {
+			continue
+		}
+		last := source.LastEvent
+		if last.SourceURL == source.URL && !last.End.IsZero() && !event.End.After(last.End) {
+			continue
+		}
+		m.cfg.Calendar.Sources[i].LastEvent = config.CalendarEventConfig{
+			SourceURL: source.URL,
+			Summary:   event.Summary,
+			Start:     event.Start,
+			End:       event.End,
+		}
+		changed = true
 	}
-	last := m.cfg.Calendar.LastEvent
-	if last.SourceURL == m.cfg.Calendar.URL && !last.End.IsZero() && !event.End.After(last.End) {
-		return
+	if changed {
+		m.saveConfig()
 	}
-	m.cfg.Calendar.LastEvent = config.CalendarEventConfig{
-		SourceURL: m.cfg.Calendar.URL,
-		Summary:   event.Summary,
-		Start:     event.Start,
-		End:       event.End,
-	}
-	m.saveConfig()
 }
 
 func mostRecentPastCalendarEvent(events []ics.Event, now time.Time) (ics.Event, bool) {
@@ -1119,10 +1170,14 @@ func workdayScheduleSummary(cfg config.WorkdayConfig) string {
 }
 
 func calendarURLSummary(cfg config.CalendarConfig) string {
-	if strings.TrimSpace(cfg.URL) == "" {
+	urls := calendarSourceURLs(cfg)
+	if len(urls) == 0 {
 		return "unset"
 	}
-	return truncateSettingValue(cfg.URL, 28)
+	if len(urls) == 1 {
+		return truncateSettingValue(urls[0], 28)
+	}
+	return fmt.Sprintf("%d sources", len(urls))
 }
 
 func truncateSettingValue(value string, maxRunes int) string {
@@ -1141,8 +1196,84 @@ func truncateSettingValue(value string, maxRunes int) string {
 
 func calendarRefreshChanged(before, after config.CalendarConfig) bool {
 	return before.ShowProgress != after.ShowProgress ||
-		before.URL != after.URL ||
+		!equalStringSlices(calendarSourceURLs(before), calendarSourceURLs(after)) ||
 		before.RefreshMinutes != after.RefreshMinutes
+}
+
+func calendarSourcesText(cfg config.CalendarConfig) string {
+	return strings.Join(calendarSourceURLs(cfg), "\n")
+}
+
+func calendarSourcesFromText(value string, previous []config.CalendarSourceConfig) []config.CalendarSourceConfig {
+	byURL := make(map[string]config.CalendarSourceConfig, len(previous))
+	for _, source := range previous {
+		source.URL = strings.TrimSpace(source.URL)
+		if source.URL != "" {
+			byURL[source.URL] = source
+		}
+	}
+	seen := make(map[string]bool)
+	sources := make([]config.CalendarSourceConfig, 0)
+	for _, line := range strings.Split(value, "\n") {
+		url := strings.TrimSpace(line)
+		if url == "" || seen[url] {
+			continue
+		}
+		source := byURL[url]
+		source.URL = url
+		sources = append(sources, source)
+		seen[url] = true
+	}
+	return sources
+}
+
+func calendarSourceURLs(cfg config.CalendarConfig) []string {
+	urls := make([]string, 0, len(cfg.Sources)+1)
+	seen := make(map[string]bool, len(cfg.Sources)+1)
+	if url := strings.TrimSpace(cfg.URL); url != "" {
+		urls = append(urls, url)
+		seen[url] = true
+	}
+	for _, source := range cfg.Sources {
+		url := strings.TrimSpace(source.URL)
+		if url == "" || seen[url] {
+			continue
+		}
+		urls = append(urls, url)
+		seen[url] = true
+	}
+	return urls
+}
+
+func calendarHasSource(cfg config.CalendarConfig, url string) bool {
+	return containsString(calendarSourceURLs(cfg), url)
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Model) pruneCalendarEvents() {
+	if len(m.calendarEvents) == 0 {
+		return
+	}
+	keep := make(map[string]bool, len(m.cfg.Calendar.Sources))
+	for _, source := range m.cfg.Calendar.Sources {
+		keep[source.URL] = true
+	}
+	for url := range m.calendarEvents {
+		if !keep[url] {
+			delete(m.calendarEvents, url)
+		}
+	}
 }
 
 func containsString(values []string, value string) bool {
@@ -1185,22 +1316,26 @@ func removeString(values []string, value string) []string {
 
 func (m Model) fetchCalendarCmd() tea.Cmd {
 	cfg := m.cfg.Calendar
-	if !cfg.ShowProgress || cfg.URL == "" {
+	if !cfg.ShowProgress || len(cfg.Sources) == 0 {
 		return nil
 	}
-	source := cfg.URL
 	now := m.displayTime()
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		events, _ := ics.Fetch(ctx, source, now)
-		return calendarFetchMsg{url: source, events: events}
+	cmds := make([]tea.Cmd, 0, len(cfg.Sources))
+	for _, source := range cfg.Sources {
+		url := source.URL
+		cmds = append(cmds, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			events, _ := ics.Fetch(ctx, url, now)
+			return calendarFetchMsg{url: url, events: events}
+		})
 	}
+	return tea.Batch(cmds...)
 }
 
 func (m Model) scheduleCalendarRefreshCmd() tea.Cmd {
 	cfg := m.cfg.Calendar
-	if !cfg.ShowProgress || cfg.URL == "" {
+	if !cfg.ShowProgress || len(cfg.Sources) == 0 {
 		return nil
 	}
 	refresh := cfg.RefreshMinutes
@@ -1212,12 +1347,15 @@ func (m Model) scheduleCalendarRefreshCmd() tea.Cmd {
 	})
 }
 
-func newCalendarURLInput() textinput.Model {
-	input := textinput.New()
+func newCalendarURLInput() textarea.Model {
+	input := textarea.New()
 	input.Prompt = ""
-	input.Placeholder = "https://example.com/calendar.ics"
-	input.CharLimit = 2048
-	input.Width = 48
+	input.Placeholder = "https://example.com/work.ics\nhttps://example.com/personal.ics"
+	input.CharLimit = 8192
+	input.ShowLineNumbers = false
+	input.EndOfBufferCharacter = ' '
+	input.SetWidth(60)
+	input.SetHeight(5)
 	return input
 }
 

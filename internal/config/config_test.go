@@ -26,7 +26,7 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Workday.ShowProgress {
 		t.Fatal("expected default workday progress bar to be off")
 	}
-	if cfg.Calendar.ShowProgress || cfg.Calendar.URL != "" || cfg.Calendar.RefreshMinutes != 15 {
+	if cfg.Calendar.ShowProgress || cfg.Calendar.URL != "" || len(cfg.Calendar.Sources) != 0 || cfg.Calendar.Mode != "merged" || cfg.Calendar.RefreshMinutes != 15 {
 		t.Fatalf("unexpected default calendar config: %+v", cfg.Calendar)
 	}
 	if cfg.UI.Emoji {
@@ -40,12 +40,18 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	cfg := Default()
 	cfg.Display.DigitStyle = "braille"
 	cfg.Calendar.ShowProgress = true
-	cfg.Calendar.URL = "https://example.com/work.ics"
-	cfg.Calendar.LastEvent = CalendarEventConfig{
-		SourceURL: cfg.Calendar.URL,
-		Summary:   "Standup",
-		Start:     time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
-		End:       time.Date(2026, 5, 1, 9, 30, 0, 0, time.UTC),
+	cfg.Calendar.Mode = "split"
+	cfg.Calendar.Sources = []CalendarSourceConfig{
+		{
+			URL: "https://example.com/work.ics",
+			LastEvent: CalendarEventConfig{
+				SourceURL: "https://example.com/work.ics",
+				Summary:   "Standup",
+				Start:     time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
+				End:       time.Date(2026, 5, 1, 9, 30, 0, 0, time.UTC),
+			},
+		},
+		{URL: "https://example.com/personal.ics"},
 	}
 	cfg.UI.NerdFont = true
 	cfg.UI.Emoji = true
@@ -57,11 +63,14 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if loaded.Display.DigitStyle != "braille" || !loaded.UI.NerdFont || !loaded.UI.Emoji {
+	if loaded.Display.DigitStyle != "braille" || !loaded.UI.NerdFont || !loaded.UI.Emoji || loaded.Calendar.Mode != "split" {
 		t.Fatalf("loaded config mismatch: %+v", loaded)
 	}
-	if loaded.Calendar.LastEvent.Summary != "Standup" || !loaded.Calendar.LastEvent.End.Equal(cfg.Calendar.LastEvent.End) {
-		t.Fatalf("loaded calendar last event mismatch: %+v", loaded.Calendar.LastEvent)
+	if len(loaded.Calendar.Sources) != 2 {
+		t.Fatalf("expected loaded calendar sources, got %+v", loaded.Calendar.Sources)
+	}
+	if loaded.Calendar.Sources[0].LastEvent.Summary != "Standup" || !loaded.Calendar.Sources[0].LastEvent.End.Equal(cfg.Calendar.Sources[0].LastEvent.End) {
+		t.Fatalf("loaded calendar source last event mismatch: %+v", loaded.Calendar.Sources[0].LastEvent)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -142,11 +151,89 @@ func TestNormalizeInvalidValues(t *testing.T) {
 	if cfg.Workday.Schedule["mon"].StartTime != "09:00" || cfg.Workday.Schedule["mon"].EndTime != "17:00" || !cfg.Workday.Schedule["mon"].Enabled || cfg.Workday.Schedule["sat"].Enabled {
 		t.Fatalf("invalid workday values were not normalized: %+v", cfg.Workday)
 	}
-	if cfg.Calendar.URL != "https://example.com/cal.ics" || cfg.Calendar.RefreshMinutes != 15 {
+	if cfg.Calendar.URL != "" || len(cfg.Calendar.Sources) != 1 || cfg.Calendar.Sources[0].URL != "https://example.com/cal.ics" || cfg.Calendar.Mode != "merged" || cfg.Calendar.RefreshMinutes != 15 {
 		t.Fatalf("calendar values were not normalized: %+v", cfg.Calendar)
 	}
-	if !cfg.Calendar.LastEvent.Start.IsZero() {
-		t.Fatalf("expected stale calendar last event to be cleared, got %+v", cfg.Calendar.LastEvent)
+	if !cfg.Calendar.Sources[0].LastEvent.Start.IsZero() {
+		t.Fatalf("expected stale calendar last event to be cleared, got %+v", cfg.Calendar.Sources[0].LastEvent)
+	}
+}
+
+func TestLoadMigratesLegacyCalendarURLToSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte(`version: 1
+time:
+    format: 24h
+    show_date: true
+    timezone: Local
+display:
+    digit_style: block
+    figlet_font: standard
+    toilet_font: standard
+    fclk_font: ""
+    seconds_style: progress_bar
+    inline_seconds: false
+    progress_empty_background: theme
+    alignment: center
+    blink_separator: false
+workday:
+    show_progress: false
+    schedule:
+        mon: {enabled: true, start_time: "09:00", end_time: "17:00"}
+        tue: {enabled: true, start_time: "09:00", end_time: "17:00"}
+        wed: {enabled: true, start_time: "09:00", end_time: "17:00"}
+        thu: {enabled: true, start_time: "09:00", end_time: "17:00"}
+        fri: {enabled: true, start_time: "09:00", end_time: "17:00"}
+        sat: {enabled: false, start_time: "09:00", end_time: "17:00"}
+        sun: {enabled: false, start_time: "09:00", end_time: "17:00"}
+calendar:
+    show_progress: true
+    url: https://example.com/work.ics
+    refresh_minutes: 15
+    last_event:
+        source_url: https://example.com/work.ics
+        summary: Standup
+        start: 2026-05-01T09:00:00Z
+        end: 2026-05-01T09:30:00Z
+theme:
+    name: tokyo-night
+    accent: cyan
+ui:
+    nerd_font: false
+    emoji: false
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg, err := NewManager(path, false).Load()
+	if err != nil {
+		t.Fatalf("load legacy calendar config: %v", err)
+	}
+	if cfg.Calendar.URL != "" || len(cfg.Calendar.Sources) != 1 || cfg.Calendar.Sources[0].URL != "https://example.com/work.ics" {
+		t.Fatalf("expected legacy URL to migrate to source, got %+v", cfg.Calendar)
+	}
+	if cfg.Calendar.Sources[0].LastEvent.Summary != "Standup" {
+		t.Fatalf("expected legacy last event to migrate to source, got %+v", cfg.Calendar.Sources[0].LastEvent)
+	}
+}
+
+func TestNormalizeCalendarSourceLastEventAllowsOmittedSourceURL(t *testing.T) {
+	cfg := Default()
+	cfg.Calendar.Sources = []CalendarSourceConfig{
+		{
+			URL: "https://example.com/work.ics",
+			LastEvent: CalendarEventConfig{
+				Summary: "Standup",
+				Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC),
+				End:     time.Date(2026, 5, 1, 9, 30, 0, 0, time.UTC),
+			},
+		},
+	}
+
+	cfg.Normalize()
+	if cfg.Calendar.Sources[0].LastEvent.SourceURL != "https://example.com/work.ics" {
+		t.Fatalf("expected source URL to be filled from source, got %+v", cfg.Calendar.Sources[0].LastEvent)
 	}
 }
 

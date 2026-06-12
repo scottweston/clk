@@ -45,6 +45,10 @@ Current config fields include:
 - `workday.start_time`: start of the configured workday, chosen from half-hour `HH:MM` values.
 - `workday.end_time`: end of the configured workday, chosen from half-hour `HH:MM` values.
 - `workday.days`: active workdays using `mon`, `tue`, `wed`, `thu`, `fri`, `sat`, `sun`; configured through the `Work days` checkbox submenu.
+- `calendar.sources`: configured HTTP(S) `.ics` feeds. Legacy `calendar.url` values are migrated into this list.
+- `calendar.mode`: `merged` combines all configured ICS sources into one progress row; `split` renders one progress row per source.
+- `calendar.refresh_minutes`: fetch interval for all configured ICS sources.
+- `calendar.sources[].last_event`: per-source remembered baseline event. Legacy top-level `calendar.last_event` is migrated to the matching source.
 - `theme.name` and `theme.accent`: built-in theme palette and accent color.
 - `ui.nerd_font`: enables Nerd Font-specific glyph choices where available.
 - `ui.emoji`: switches compact progress labels from Unicode symbols to emoji symbols.
