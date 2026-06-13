@@ -19,6 +19,7 @@ import (
 
 	"clk/internal/config"
 	"clk/internal/ics"
+	"clk/internal/locale"
 	"clk/internal/render"
 	"clk/internal/theme"
 )
@@ -421,7 +422,7 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 	lines := []string{clock}
 	if m.cfg.Time.ShowDate {
 		lines = append(lines, "")
-		lines = append(lines, styles.Date.Render(now.Format("Monday, 02 Jan 2006")))
+		lines = append(lines, styles.Date.Render(locale.FormatDate(now)))
 	}
 	secondsWidth := m.progressWidth(clockArt)
 	seconds := render.SecondsStyled(render.SecondsOptions{

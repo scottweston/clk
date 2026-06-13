@@ -36,6 +36,8 @@ func firstCalendarLastEvent(cfg config.CalendarConfig) config.CalendarEventConfi
 }
 
 func TestModelRendersClock(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+
 	m := New(config.Default(), config.NewManager("", true))
 	m.width = 100
 	m.height = 30
