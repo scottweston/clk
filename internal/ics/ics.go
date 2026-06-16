@@ -2,10 +2,14 @@ package ics
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,13 +23,48 @@ const (
 	maxReturned      = 64
 )
 
+var userCacheDir = os.UserCacheDir
+
 type Event struct {
 	Summary string
 	Start   time.Time
 	End     time.Time
+	AllDay  bool
 }
 
 func Fetch(ctx context.Context, source string, now time.Time) ([]Event, error) {
+	data, err := fetchData(ctx, source)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data, now)
+}
+
+func FetchCached(ctx context.Context, source string, now time.Time, refreshInterval time.Duration) ([]Event, error) {
+	if refreshInterval <= 0 {
+		refreshInterval = 15 * time.Minute
+	}
+	if data, ok := readFreshCache(source, refreshInterval); ok {
+		if events, err := Parse(data, now); err == nil {
+			return events, nil
+		}
+	}
+
+	data, err := fetchData(ctx, source)
+	if err == nil {
+		_ = writeCache(source, data)
+		return Parse(data, now)
+	}
+
+	if data, ok := readCache(source); ok {
+		if events, parseErr := Parse(data, now); parseErr == nil {
+			return events, nil
+		}
+	}
+	return nil, err
+}
+
+func fetchData(ctx context.Context, source string) ([]byte, error) {
 	parsed, err := url.Parse(strings.TrimSpace(source))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return nil, fmt.Errorf("calendar URL must be http or https")
@@ -51,7 +90,71 @@ func Fetch(ctx context.Context, source string, now time.Time) ([]Event, error) {
 	if len(data) > maxCalendarBytes {
 		return nil, fmt.Errorf("calendar is larger than %d bytes", maxCalendarBytes)
 	}
-	return Parse(data, now)
+	return data, nil
+}
+
+func readFreshCache(source string, maxAge time.Duration) ([]byte, bool) {
+	path, err := cachePath(source)
+	if err != nil {
+		return nil, false
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || time.Since(info.ModTime()) > maxAge {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	return data, err == nil
+}
+
+func readCache(source string) ([]byte, bool) {
+	path, err := cachePath(source)
+	if err != nil {
+		return nil, false
+	}
+	data, err := os.ReadFile(path)
+	return data, err == nil
+}
+
+func writeCache(source string, data []byte) error {
+	path, err := cachePath(source)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), ".ics-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	defer func() {
+		_ = os.Remove(tempPath)
+	}()
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tempPath, 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		_ = os.Remove(path)
+		return os.Rename(tempPath, path)
+	}
+	return nil
+}
+
+func cachePath(source string) (string, error) {
+	dir, err := userCacheDir()
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(source)))
+	return filepath.Join(dir, "clk", "ics", hex.EncodeToString(sum[:])+".ics"), nil
 }
 
 func Parse(data []byte, now time.Time) ([]Event, error) {
@@ -174,7 +277,7 @@ func (e rawEvent) expand(now time.Time) []Event {
 	}
 
 	if len(e.rrule) == 0 {
-		event := Event{Summary: e.summary, Start: e.start, End: e.start.Add(duration)}
+		event := Event{Summary: e.summary, Start: e.start, End: e.start.Add(duration), AllDay: e.allDay}
 		if event.End.After(now.Add(-lookAhead)) && event.Start.Before(now.Add(lookAhead)) {
 			return []Event{event}
 		}
@@ -226,7 +329,7 @@ func (e rawEvent) expandRecurring(now time.Time, duration time.Duration) []Event
 		}
 		if !end.After(now) {
 			if end.After(earliestPrevious) && (!hasPrevious || end.After(previous.End)) {
-				previous = Event{Summary: e.summary, Start: start, End: end}
+				previous = Event{Summary: e.summary, Start: start, End: end, AllDay: e.allDay}
 				hasPrevious = true
 			}
 			return true
@@ -234,7 +337,7 @@ func (e rawEvent) expandRecurring(now time.Time, duration time.Duration) []Event
 		if !start.Before(horizon) {
 			return true
 		}
-		out = append(out, Event{Summary: e.summary, Start: start, End: end})
+		out = append(out, Event{Summary: e.summary, Start: start, End: end, AllDay: e.allDay})
 		return len(out) < maxReturned
 	}
 

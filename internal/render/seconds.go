@@ -45,6 +45,7 @@ type CalendarEventOptions struct {
 	Summary string
 	Start   time.Time
 	End     time.Time
+	AllDay  bool
 }
 
 type ProgressDirection string
@@ -194,6 +195,15 @@ func Calendar(now time.Time, width int, progress func(float64, int) string, dire
 	return label + " " + bar
 }
 
+func CalendarAllDayRows(now time.Time, width int, opts CalendarOptions) []string {
+	events := calendarAllDayEvents(now, opts.Events)
+	rows := make([]string, 0, len(events))
+	for _, event := range events {
+		rows = append(rows, calendarAllDayLabel(event.Summary, width))
+	}
+	return rows
+}
+
 func calendarLabel(summary, remaining string, width int, emoji bool) string {
 	summary = strings.TrimSpace(summary)
 	prefix := statusSymbol("event", emoji, time.Time{})
@@ -217,6 +227,24 @@ func calendarLabel(summary, remaining string, width int, emoji bool) string {
 		return base
 	}
 	return fmt.Sprintf("%s %s %s", prefix, summary, remaining)
+}
+
+func calendarAllDayLabel(summary string, width int) string {
+	summary = strings.TrimSpace(summary)
+	prefix := "📌 All day"
+	if summary == "" {
+		return truncateCells(prefix, width)
+	}
+	base := prefix + ": "
+	available := width - lipgloss.Width(base)
+	if available <= 0 {
+		return truncateCells(prefix, width)
+	}
+	summary = truncateCells(summary, available)
+	if summary == "" {
+		return truncateCells(prefix, width)
+	}
+	return base + summary
 }
 
 func statusSymbol(kind string, emoji bool, now time.Time) string {
@@ -416,7 +444,7 @@ func CalendarProgress(now time.Time, opts CalendarOptions) (ProgressInfo, bool) 
 func calendarEvents(events []CalendarEventOptions) []CalendarEventOptions {
 	out := make([]CalendarEventOptions, 0, len(events))
 	for _, event := range events {
-		if event.Start.IsZero() {
+		if event.AllDay || event.Start.IsZero() {
 			continue
 		}
 		event.Summary = strings.TrimSpace(event.Summary)
@@ -431,6 +459,24 @@ func calendarEvents(events []CalendarEventOptions) []CalendarEventOptions {
 		}
 		return out[i].Start.Before(out[j].Start)
 	})
+	return out
+}
+
+func calendarAllDayEvents(now time.Time, events []CalendarEventOptions) []CalendarEventOptions {
+	out := make([]CalendarEventOptions, 0, len(events))
+	for _, event := range events {
+		if !event.AllDay || event.Start.IsZero() {
+			continue
+		}
+		event.Summary = strings.TrimSpace(event.Summary)
+		if !event.End.After(event.Start) {
+			event.End = event.Start.Add(24 * time.Hour)
+		}
+		if event.Start.After(now) || !event.End.After(now) {
+			continue
+		}
+		out = append(out, event)
+	}
 	return out
 }
 

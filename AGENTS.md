@@ -93,3 +93,7 @@ Tests cover config normalization/migration, renderer output, width stability for
 - Keep settings submenus keyboard-driven and width-stable; main settings and workday checkboxes render through Bubbles list with model-owned selection state.
 - Keep external command support optional and failure-tolerant.
 - Run `gofmt -w internal cmd` and `go test ./...` before handing off changes.
+
+## Misc
+
+- the assets directory will be where we place image/animations assets for the README.md when it comes time to craft a good public facing README.md for the github repo, there may be some work-in-progress assets in there but we don't need to worry about that until we reach a version we're happy to release

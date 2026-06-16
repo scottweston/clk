@@ -649,6 +649,145 @@ func TestCalendarSplitModeRendersEachSourceProgressBar(t *testing.T) {
 	}
 }
 
+func TestCalendarSplitModeRendersAllDayRowsBelowTheirSource(t *testing.T) {
+	workURL := "https://example.com/work.ics"
+	homeURL := "https://example.com/home.ics"
+	holidayURL := "https://example.com/holiday.ics"
+	now := time.Date(2026, 6, 17, 9, 7, 0, 0, time.Local)
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Calendar.ShowProgress = true
+	cfg.Calendar.Mode = "split"
+	cfg.Calendar.Sources = []config.CalendarSourceConfig{
+		{URL: workURL},
+		{URL: homeURL},
+		{URL: holidayURL},
+	}
+	cfg.UI.Emoji = true
+	m := New(cfg, config.NewManager("", true))
+	m.width = 100
+	m.height = 30
+	m.now = now
+	m.calendarEvents = map[string][]ics.Event{
+		workURL: {
+			{
+				Summary: "Introduction to Laser Cutting",
+				Start:   time.Date(2026, 6, 17, 9, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 6, 17, 9, 30, 0, 0, time.Local),
+			},
+		},
+		homeURL: {
+			{
+				Summary: "Mum's Birthday",
+				Start:   time.Date(2026, 6, 17, 0, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 6, 18, 0, 0, 0, 0, time.Local),
+				AllDay:  true,
+			},
+			{
+				Summary: "General Waste",
+				Start:   time.Date(2026, 6, 17, 22, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 6, 17, 23, 0, 0, 0, time.Local),
+			},
+		},
+		holidayURL: {
+			{
+				Summary: "Opto test",
+				Start:   time.Date(2026, 6, 22, 14, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 6, 22, 15, 0, 0, 0, time.Local),
+			},
+			{
+				Summary: "Foobar Public Holiday",
+				Start:   time.Date(2026, 6, 17, 0, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 6, 18, 0, 0, 0, 0, time.Local),
+				AllDay:  true,
+			},
+		},
+	}
+
+	calendar := m.calendarProgressView(now, 80)
+	expected := []string{
+		"Introduction to Laser",
+		"General Waste",
+		"📌 All day: Mum's Birthday",
+		"Opto test",
+		"📌 All day: Foobar Public Holiday",
+	}
+	previous := -1
+	for _, label := range expected {
+		index := strings.Index(calendar, label)
+		if index < 0 {
+			t.Fatalf("expected split calendar to include %q, got %q", label, calendar)
+		}
+		if index < previous {
+			t.Fatalf("expected split calendar labels in source order %v, got %q", expected, calendar)
+		}
+		previous = index
+	}
+}
+
+func TestCalendarMergedModeRendersAllDayRowsBelowProgress(t *testing.T) {
+	workURL := "https://example.com/work.ics"
+	homeURL := "https://example.com/home.ics"
+	now := time.Date(2026, 6, 17, 9, 7, 0, 0, time.Local)
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Calendar.ShowProgress = true
+	cfg.Calendar.Mode = "merged"
+	cfg.Calendar.Sources = []config.CalendarSourceConfig{
+		{URL: workURL},
+		{URL: homeURL},
+	}
+	cfg.UI.Emoji = true
+	m := New(cfg, config.NewManager("", true))
+	m.width = 100
+	m.height = 30
+	m.now = now
+	m.calendarEvents = map[string][]ics.Event{
+		workURL: {
+			{
+				Summary: "Mum's Birthday",
+				Start:   time.Date(2026, 6, 17, 0, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 6, 18, 0, 0, 0, 0, time.Local),
+				AllDay:  true,
+			},
+			{
+				Summary: "Introduction to Laser Cutting",
+				Start:   time.Date(2026, 6, 17, 9, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 6, 17, 9, 30, 0, 0, time.Local),
+			},
+		},
+		homeURL: {
+			{
+				Summary: "Foobar Public Holiday",
+				Start:   time.Date(2026, 6, 17, 0, 0, 0, 0, time.Local),
+				End:     time.Date(2026, 6, 18, 0, 0, 0, 0, time.Local),
+				AllDay:  true,
+			},
+		},
+	}
+
+	calendar := m.calendarProgressView(now, 80)
+	expected := []string{
+		"Introduction to Laser",
+		"📌 All day: Mum's Birthday",
+		"📌 All day: Foobar Public Holiday",
+	}
+	previous := -1
+	for _, label := range expected {
+		index := strings.Index(calendar, label)
+		if index < 0 {
+			t.Fatalf("expected merged calendar to include %q, got %q", label, calendar)
+		}
+		if index < previous {
+			t.Fatalf("expected merged calendar labels below progress in source order %v, got %q", expected, calendar)
+		}
+		previous = index
+	}
+	if !strings.Contains(calendar, "\n\n📌 All day") {
+		t.Fatalf("expected blank line before all-day rows, got %q", calendar)
+	}
+}
+
 func TestProgressRemainingFillUsesDimmedAccentBlock(t *testing.T) {
 	cfg := config.Default()
 	cfg.Theme.Name = "tokyo-night"

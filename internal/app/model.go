@@ -1046,10 +1046,12 @@ func (m Model) calendarProgressView(now time.Time, width int) string {
 	if m.cfg.Calendar.Mode == "split" {
 		rows := make([]string, 0, len(m.cfg.Calendar.Sources))
 		for _, source := range m.cfg.Calendar.Sources {
-			row := render.Calendar(now, width, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, calendarOptions(m.calendarEvents[source.URL], m.startedAt, source, now, m.cfg.UI.Emoji))
-			if row != "" {
-				rows = append(rows, row)
+			opts := calendarOptions(m.calendarEvents[source.URL], m.startedAt, source, now, m.cfg.UI.Emoji)
+			progress := render.Calendar(now, width, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, opts)
+			if progress != "" {
+				rows = append(rows, progress)
 			}
+			rows = append(rows, render.CalendarAllDayRows(now, width, opts)...)
 		}
 		return strings.Join(rows, "\n\n")
 	}
@@ -1058,7 +1060,14 @@ func (m Model) calendarProgressView(now time.Time, width int) string {
 	for _, source := range m.cfg.Calendar.Sources {
 		events = append(events, m.calendarEvents[source.URL]...)
 	}
-	return render.Calendar(now, width, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, mergedCalendarOptions(events, m.startedAt, m.cfg.Calendar, now, m.cfg.UI.Emoji))
+	opts := mergedCalendarOptions(events, m.startedAt, m.cfg.Calendar, now, m.cfg.UI.Emoji)
+	rows := make([]string, 0, 1)
+	progress := render.Calendar(now, width, m.progressView, m.workdayProgressView, m.cfg.UI.NerdFont, opts)
+	if progress != "" {
+		rows = append(rows, progress)
+	}
+	rows = append(rows, render.CalendarAllDayRows(now, width, opts)...)
+	return strings.Join(rows, "\n\n")
 }
 
 func calendarOptions(events []ics.Event, baseline time.Time, source config.CalendarSourceConfig, now time.Time, emoji bool) render.CalendarOptions {
@@ -1068,6 +1077,7 @@ func calendarOptions(events []ics.Event, baseline time.Time, source config.Calen
 			Summary: event.Summary,
 			Start:   event.Start,
 			End:     event.End,
+			AllDay:  event.AllDay,
 		})
 	}
 	if event, ok := rememberedCalendarEvent(source, now); ok {
@@ -1075,6 +1085,7 @@ func calendarOptions(events []ics.Event, baseline time.Time, source config.Calen
 			Summary: event.Summary,
 			Start:   event.Start,
 			End:     event.End,
+			AllDay:  event.AllDay,
 		})
 	}
 	return render.CalendarOptions{Events: out, Baseline: baseline, Emoji: emoji}
@@ -1087,6 +1098,7 @@ func mergedCalendarOptions(events []ics.Event, baseline time.Time, cfg config.Ca
 			Summary: event.Summary,
 			Start:   event.Start,
 			End:     event.End,
+			AllDay:  event.AllDay,
 		})
 	}
 	for _, source := range cfg.Sources {
@@ -1141,6 +1153,9 @@ func mostRecentPastCalendarEvent(events []ics.Event, now time.Time) (ics.Event, 
 	hasPrevious := false
 	for _, event := range events {
 		if event.Start.IsZero() {
+			continue
+		}
+		if event.AllDay {
 			continue
 		}
 		if !event.End.After(event.Start) {
@@ -1321,13 +1336,14 @@ func (m Model) fetchCalendarCmd() tea.Cmd {
 		return nil
 	}
 	now := m.displayTime()
+	refresh := time.Duration(cfg.RefreshMinutes) * time.Minute
 	cmds := make([]tea.Cmd, 0, len(cfg.Sources))
 	for _, source := range cfg.Sources {
 		url := source.URL
 		cmds = append(cmds, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			events, _ := ics.Fetch(ctx, url, now)
+			events, _ := ics.FetchCached(ctx, url, now, refresh)
 			return calendarFetchMsg{url: url, events: events}
 		})
 	}

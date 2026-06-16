@@ -431,6 +431,38 @@ func TestCalendarCanRenderEmojiLabel(t *testing.T) {
 	}
 }
 
+func TestCalendarAllDayRowsDoNotConsumeProgress(t *testing.T) {
+	now := time.Date(2026, 5, 1, 8, 30, 0, 0, time.Local)
+	opts := CalendarOptions{Events: []CalendarEventOptions{
+		{
+			Summary: "Holiday",
+			Start:   time.Date(2026, 5, 1, 0, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 2, 0, 0, 0, 0, time.Local),
+			AllDay:  true,
+		},
+		{
+			Summary: "Tomorrow",
+			Start:   time.Date(2026, 5, 2, 0, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 3, 0, 0, 0, 0, time.Local),
+			AllDay:  true,
+		},
+		{
+			Summary: "Standup",
+			Start:   time.Date(2026, 5, 1, 9, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 1, 9, 30, 0, 0, time.Local),
+		},
+	}}
+
+	progress := Calendar(now, 48, nil, nil, false, opts)
+	if !strings.Contains(progress, "Standup") || strings.Contains(progress, "Holiday") {
+		t.Fatalf("expected timed event progress to ignore all-day event, got %q", progress)
+	}
+	rows := CalendarAllDayRows(now, 48, opts)
+	if len(rows) != 1 || rows[0] != "📌 All day: Holiday" {
+		t.Fatalf("expected active all-day row, got %#v", rows)
+	}
+}
+
 func TestCalendarEmptySummaryDoesNotRenderEventText(t *testing.T) {
 	opts := CalendarOptions{Events: []CalendarEventOptions{
 		{
