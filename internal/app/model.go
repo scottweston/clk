@@ -64,12 +64,23 @@ type calendarFetchMsg struct {
 	events []ics.Event
 }
 
+type prideUnlockMsg struct{}
+
 const progressEmptyCharacter = '⣿'
 
 const (
 	settingsMinVisibleOptions = 3
 	settingsPanelChromeRows   = 6
 )
+
+var prideColors = []string{
+	"#e40303",
+	"#ff8c00",
+	"#ffed00",
+	"#008026",
+	"#24408e",
+	"#732982",
+}
 
 func New(cfg config.Config, manager config.Manager) Model {
 	cfg.Normalize()
@@ -90,7 +101,7 @@ func New(cfg config.Config, manager config.Manager) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
+	return tea.Batch(tick(), m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd(), m.prideUnlockCmd())
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -100,6 +111,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 	case tickMsg:
 		m.now = time.Time(msg)
+		m.unlockPrideIfNeeded(m.displayTime())
 		m.rememberPastCalendarEvent(m.displayTime())
 		return m, tick()
 	case calendarRefreshMsg:
@@ -113,6 +125,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.calendarEvents[msg.url] = msg.events
 		m.rememberPastCalendarEvent(m.displayTime())
+	case prideUnlockMsg:
+		m.unlockPrideIfNeeded(m.displayTime())
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -364,6 +378,23 @@ func (m *Model) saveConfig() {
 	m.saveError = ""
 }
 
+func (m Model) prideUnlockCmd() tea.Cmd {
+	if !shouldUnlockPride(m.cfg.Display, m.displayTime()) {
+		return nil
+	}
+	return func() tea.Msg {
+		return prideUnlockMsg{}
+	}
+}
+
+func (m *Model) unlockPrideIfNeeded(now time.Time) {
+	if !shouldUnlockPride(m.cfg.Display, now) {
+		return
+	}
+	m.cfg.Display.PrideUnlocked = true
+	m.saveConfig()
+}
+
 func newProgressModel(cfg config.Config) progress.Model {
 	palette := theme.Lookup(cfg.Theme.Name)
 	accent := theme.Accent(palette, cfg.Theme.Accent)
@@ -418,6 +449,9 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		FclkFont:   m.cfg.Display.FclkFont,
 	})
 	clock := styles.Clock.Render(clockArt)
+	if prideClockActive(m.cfg.Display, now) {
+		clock = prideClockArt(clockArt, m.cfg.Display.PrideMode, background)
+	}
 
 	lines := []string{clock}
 	if m.cfg.Time.ShowDate {
@@ -467,6 +501,104 @@ func (m Model) clockView(styles theme.Stylesheet, background string) string {
 		}
 	}
 	return joinVerticalWithBackground(lipgloss.Center, background, lines...)
+}
+
+func prideClockActive(display config.DisplayConfig, now time.Time) bool {
+	return display.PrideMode != "off" && (display.PrideUnlocked || isPrideMonth(now))
+}
+
+func shouldUnlockPride(display config.DisplayConfig, now time.Time) bool {
+	return !display.PrideUnlocked && display.PrideMode != "off" && isPrideMonth(now)
+}
+
+func prideSettingVisible(display config.DisplayConfig, now time.Time) bool {
+	return display.PrideUnlocked || shouldUnlockPride(display, now)
+}
+
+func isPrideMonth(now time.Time) bool {
+	return now.Month() == time.June
+}
+
+func prideClockArt(clockArt, mode, background string) string {
+	if clockArt == "" {
+		return ""
+	}
+	lines := strings.Split(clockArt, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	maxWidth := 0
+	for _, line := range lines {
+		maxWidth = max(maxWidth, lipgloss.Width(line))
+	}
+	mode = prideResolvedMode(mode, len(lines), maxWidth)
+	if mode == "off" {
+		return clockArt
+	}
+
+	var b strings.Builder
+	for y, line := range lines {
+		if y > 0 {
+			b.WriteByte('\n')
+		}
+		x := 0
+		for _, r := range line {
+			cellWidth := lipgloss.Width(string(r))
+			if cellWidth < 1 {
+				b.WriteRune(r)
+				continue
+			}
+			color := prideColor(mode, x, y, maxWidth, len(lines))
+			b.WriteString(prideCellStyle(color, background).Render(string(r)))
+			x += cellWidth
+		}
+	}
+	return b.String()
+}
+
+func prideResolvedMode(mode string, height, width int) string {
+	switch mode {
+	case "horizontal", "vertical", "diagonal":
+		return mode
+	case "off":
+		return "off"
+	}
+	if height >= len(prideColors) {
+		return "horizontal"
+	}
+	if width >= len(prideColors) {
+		return "vertical"
+	}
+	return "diagonal"
+}
+
+func prideColor(mode string, x, y, width, height int) string {
+	switch mode {
+	case "horizontal":
+		return prideColors[stripeIndex(y, max(1, height))]
+	case "diagonal":
+		return prideColors[stripeIndex(x+y, max(1, width+height-1))]
+	default:
+		return prideColors[stripeIndex(x, max(1, width))]
+	}
+}
+
+func stripeIndex(position, total int) int {
+	if total <= 1 {
+		return 0
+	}
+	idx := position * len(prideColors) / total
+	if idx >= len(prideColors) {
+		return len(prideColors) - 1
+	}
+	return idx
+}
+
+func prideCellStyle(foreground, background string) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(foreground)).
+		Background(lipgloss.Color(background)).
+		Bold(true)
 }
 
 func (m Model) progressWidth(clockArt string) int {
@@ -885,6 +1017,11 @@ func (m Model) settingItems() []settingItem {
 		toggleItem("Inline sec", func(c config.Config) bool { return c.Display.InlineSeconds }, func(v bool, c *config.Config) { c.Display.InlineSeconds = v }),
 		cycleItem("Seconds", func(c config.Config) string { return c.Display.SecondsStyle }, func(v string, c *config.Config) { c.Display.SecondsStyle = v }, config.SecondsStyles),
 		cycleItem("Bar bg", func(c config.Config) string { return c.Display.ProgressEmptyBackground }, func(v string, c *config.Config) { c.Display.ProgressEmptyBackground = v }, config.ProgressEmptyBackgrounds),
+	)
+	if prideSettingVisible(m.cfg.Display, m.displayTime()) {
+		items = append(items, cycleItem("Pride", func(c config.Config) string { return c.Display.PrideMode }, func(v string, c *config.Config) { c.Display.PrideMode = v }, config.PrideModes))
+	}
+	items = append(items,
 		toggleItem("Workday bar", func(c config.Config) bool { return c.Workday.ShowProgress }, func(v bool, c *config.Config) { c.Workday.ShowProgress = v }),
 		toggleItem("ICS bar", func(c config.Config) bool { return c.Calendar.ShowProgress }, func(v bool, c *config.Config) { c.Calendar.ShowProgress = v }),
 		cycleItem("ICS mode", func(c config.Config) string { return c.Calendar.Mode }, func(v string, c *config.Config) { c.Calendar.Mode = v }, config.CalendarModes),

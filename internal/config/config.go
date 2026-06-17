@@ -41,6 +41,8 @@ type DisplayConfig struct {
 	SecondsStyle            string `yaml:"seconds_style"`
 	InlineSeconds           bool   `yaml:"inline_seconds"`
 	ProgressEmptyBackground string `yaml:"progress_empty_background"`
+	PrideMode               string `yaml:"pride"`
+	PrideUnlocked           bool   `yaml:"pride_unlocked,omitempty"`
 	Alignment               string `yaml:"alignment"`
 	Size                    string `yaml:"size,omitempty"`
 	BlinkSeparator          bool   `yaml:"blink_separator"`
@@ -116,6 +118,8 @@ func Default() Config {
 			SecondsStyle:            "progress_bar",
 			InlineSeconds:           false,
 			ProgressEmptyBackground: "theme",
+			PrideMode:               "auto",
+			PrideUnlocked:           false,
 			Alignment:               "center",
 			BlinkSeparator:          false,
 		},
@@ -245,6 +249,9 @@ func (c *Config) Normalize() {
 	if !contains(ProgressEmptyBackgrounds, c.Display.ProgressEmptyBackground) {
 		c.Display.ProgressEmptyBackground = "theme"
 	}
+	if !contains(PrideModes, c.Display.PrideMode) {
+		c.Display.PrideMode = "auto"
+	}
 	if !contains(Alignments, c.Display.Alignment) {
 		c.Display.Alignment = "center"
 	}
@@ -294,6 +301,8 @@ var SecondsStyles = []string{
 }
 
 var ProgressEmptyBackgrounds = []string{"theme", "accent", "muted", "foreground", "warning"}
+
+var PrideModes = []string{"horizontal", "vertical", "diagonal", "auto", "off"}
 
 var CalendarModes = []string{"merged", "split"}
 

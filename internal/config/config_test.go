@@ -20,6 +20,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Display.ProgressEmptyBackground != "theme" {
 		t.Fatalf("expected theme progress empty background, got %q", cfg.Display.ProgressEmptyBackground)
 	}
+	if cfg.Display.PrideMode != "auto" || cfg.Display.PrideUnlocked {
+		t.Fatalf("unexpected default pride config: %+v", cfg.Display)
+	}
 	if cfg.Workday.Schedule["mon"].StartTime != "09:00" || cfg.Workday.Schedule["mon"].EndTime != "17:00" || !cfg.Workday.Schedule["mon"].Enabled || cfg.Workday.Schedule["sat"].Enabled {
 		t.Fatalf("expected default weekday 09:00-17:00 schedule, got %+v", cfg.Workday)
 	}
@@ -39,6 +42,8 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	manager := NewManager(path, false)
 	cfg := Default()
 	cfg.Display.DigitStyle = "braille"
+	cfg.Display.PrideMode = "diagonal"
+	cfg.Display.PrideUnlocked = true
 	cfg.Calendar.ShowProgress = true
 	cfg.Calendar.Mode = "split"
 	cfg.Calendar.Sources = []CalendarSourceConfig{
@@ -63,7 +68,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if loaded.Display.DigitStyle != "braille" || !loaded.UI.NerdFont || !loaded.UI.Emoji || loaded.Calendar.Mode != "split" {
+	if loaded.Display.DigitStyle != "braille" || loaded.Display.PrideMode != "diagonal" || !loaded.Display.PrideUnlocked || !loaded.UI.NerdFont || !loaded.UI.Emoji || loaded.Calendar.Mode != "split" {
 		t.Fatalf("loaded config mismatch: %+v", loaded)
 	}
 	if len(loaded.Calendar.Sources) != 2 {
@@ -127,7 +132,7 @@ func TestNormalizeInvalidValues(t *testing.T) {
 
 	cfg := Config{
 		Time:    TimeConfig{Format: "bad"},
-		Display: DisplayConfig{DigitStyle: "bad", FigletFont: "bad", ToiletFont: "bad", FclkFont: "bad", SecondsStyle: "bad", ProgressEmptyBackground: "bad", Alignment: "bad", Size: "bad"},
+		Display: DisplayConfig{DigitStyle: "bad", FigletFont: "bad", ToiletFont: "bad", FclkFont: "bad", SecondsStyle: "bad", ProgressEmptyBackground: "bad", PrideMode: "bad", Alignment: "bad", Size: "bad"},
 		Workday: WorkdayConfig{Schedule: map[string]WorkdayDayConfig{
 			"mon": {Enabled: true, StartTime: "bad", EndTime: "bad"},
 			"wat": {Enabled: true, StartTime: "12:00", EndTime: "13:00"},
@@ -145,7 +150,7 @@ func TestNormalizeInvalidValues(t *testing.T) {
 		Theme: ThemeConfig{Accent: "bad"},
 	}
 	cfg.Normalize()
-	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.FclkFont != "" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.ProgressEmptyBackground != "theme" || cfg.Display.Size != "" {
+	if cfg.Time.Format != "24h" || cfg.Display.DigitStyle != "block" || cfg.Display.FigletFont != "standard" || cfg.Display.ToiletFont != "standard" || cfg.Display.FclkFont != "" || cfg.Display.SecondsStyle != "progress_bar" || cfg.Display.ProgressEmptyBackground != "theme" || cfg.Display.PrideMode != "auto" || cfg.Display.Size != "" {
 		t.Fatalf("invalid values were not normalized: %+v", cfg)
 	}
 	if cfg.Workday.Schedule["mon"].StartTime != "09:00" || cfg.Workday.Schedule["mon"].EndTime != "17:00" || !cfg.Workday.Schedule["mon"].Enabled || cfg.Workday.Schedule["sat"].Enabled {

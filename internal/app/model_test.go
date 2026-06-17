@@ -108,6 +108,78 @@ func TestSettingsExposeScheduleProgressControls(t *testing.T) {
 	}
 }
 
+func TestPrideSettingHiddenUntilJuneOrUnlock(t *testing.T) {
+	cfg := config.Default()
+	m := New(cfg, config.NewManager("", true))
+	m.now = time.Date(2026, 5, 31, 12, 0, 0, 0, time.Local)
+	if hasSettingItem(m, "Pride") {
+		t.Fatal("expected pride setting to be hidden before unlock outside pride month")
+	}
+
+	m.now = time.Date(2026, 6, 1, 12, 0, 0, 0, time.Local)
+	if !hasSettingItem(m, "Pride") {
+		t.Fatal("expected pride setting to be visible during pride month")
+	}
+
+	cfg.Display.PrideUnlocked = true
+	m = New(cfg, config.NewManager("", true))
+	m.now = time.Date(2026, 7, 1, 12, 0, 0, 0, time.Local)
+	if !hasSettingItem(m, "Pride") {
+		t.Fatal("expected pride setting to stay visible after unlock")
+	}
+}
+
+func TestPrideUnlockPersistsDuringJune(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	manager := config.NewManager(path, false)
+	m := New(config.Default(), manager)
+	m.now = time.Date(2026, 6, 1, 12, 0, 0, 0, time.Local)
+
+	next, _ := m.Update(prideUnlockMsg{})
+	updated := next.(Model)
+	if !updated.cfg.Display.PrideUnlocked {
+		t.Fatal("expected pride unlock to update model config")
+	}
+	loaded, err := manager.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !loaded.Display.PrideUnlocked {
+		t.Fatalf("expected pride unlock to be persisted, got %+v", loaded.Display)
+	}
+}
+
+func TestPrideClockAutoChoosesOrientationFromClockSize(t *testing.T) {
+	background := "#000000"
+	vertical := prideClockArt("abcdef", "auto", background)
+	if !strings.Contains(vertical, prideCellStyle(prideColors[0], background).Render("a")) ||
+		!strings.Contains(vertical, prideCellStyle(prideColors[5], background).Render("f")) {
+		t.Fatalf("expected one-line auto pride clock to render vertical stripes, got %q", vertical)
+	}
+
+	horizontal := prideClockArt("a\nb\nc\nd\ne\nf", "auto", background)
+	if !strings.Contains(horizontal, prideCellStyle(prideColors[0], background).Render("a")) ||
+		!strings.Contains(horizontal, prideCellStyle(prideColors[5], background).Render("f")) {
+		t.Fatalf("expected six-line auto pride clock to render horizontal stripes, got %q", horizontal)
+	}
+}
+
+func TestPrideClockOnlyActiveOutsideJuneAfterUnlock(t *testing.T) {
+	display := config.Default().Display
+	july := time.Date(2026, 7, 1, 12, 0, 0, 0, time.Local)
+	if prideClockActive(display, july) {
+		t.Fatal("expected pride clock to be inactive outside June before unlock")
+	}
+	display.PrideUnlocked = true
+	if !prideClockActive(display, july) {
+		t.Fatal("expected pride clock to stay active outside June after unlock")
+	}
+	display.PrideMode = "off"
+	if prideClockActive(display, july) {
+		t.Fatal("expected off pride mode to disable pride clock")
+	}
+}
+
 func TestCalendarURLSettingsEditorSavesNoConfig(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
 	m.settings = true
