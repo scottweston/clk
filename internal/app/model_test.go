@@ -1,6 +1,9 @@
 package app
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +15,7 @@ import (
 	"clk/internal/config"
 	"clk/internal/ics"
 	"clk/internal/render"
+	"clk/internal/share"
 	"clk/internal/theme"
 )
 
@@ -33,6 +37,22 @@ func firstCalendarLastEvent(cfg config.CalendarConfig) config.CalendarEventConfi
 		return config.CalendarEventConfig{}
 	}
 	return cfg.Sources[0].LastEvent
+}
+
+func runModelCommands(t *testing.T, model Model, cmd tea.Cmd) Model {
+	t.Helper()
+	if cmd == nil {
+		return model
+	}
+	msg := cmd()
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, child := range batch {
+			model = runModelCommands(t, model, child)
+		}
+		return model
+	}
+	next, _ := model.Update(msg)
+	return next.(Model)
 }
 
 func TestModelRendersClock(t *testing.T) {
@@ -101,10 +121,93 @@ func TestProgressBackgroundSettingsChangeNoConfig(t *testing.T) {
 
 func TestSettingsExposeScheduleProgressControls(t *testing.T) {
 	m := New(config.Default(), config.NewManager("", true))
-	for _, label := range []string{"Workday bar", "ICS bar", "ICS mode", "ICS URLs", "Emoji"} {
+	for _, label := range []string{"Workday bar", "ICS bar", "Data sharing", "ICS mode", "ICS URLs", "Emoji"} {
 		if !hasSettingItem(m, label) {
 			t.Fatalf("expected setting %q", label)
 		}
+	}
+}
+
+func TestCalendarDataNeededForSharingWithoutICSBar(t *testing.T) {
+	cfg := config.Default()
+	cfg.Calendar.ShowProgress = false
+	cfg.Sharing.Enabled = true
+	addTestCalendarSource(&cfg)
+	m := New(cfg, config.NewManager("", true))
+	if !calendarDataNeeded(m.cfg) {
+		t.Fatal("expected sharing to require calendar data")
+	}
+	if m.fetchCalendarCmd() == nil || m.scheduleCalendarRefreshCmd() == nil {
+		t.Fatal("expected calendar fetch and refresh while sharing is enabled")
+	}
+}
+
+func TestDataSharingSettingStartsAndStopsSocket(t *testing.T) {
+	m := New(config.Default(), config.NewManager("", true))
+	path := filepath.Join(t.TempDir(), "clk.sock")
+	m.sharing = share.NewAt(path)
+	m.settings = true
+	m.cursor = settingIndex(m, "Data sharing")
+
+	cmd := m.changeSetting(1)
+	m = runModelCommands(t, m, cmd)
+	if strings.Contains(m.sharingError, "operation not permitted") {
+		t.Skipf("unix sockets are not permitted in this sandbox: %s", m.sharingError)
+	}
+	if !m.cfg.Sharing.Enabled {
+		t.Fatal("expected sharing setting to be enabled")
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("expected sharing socket: %v", err)
+	}
+
+	cmd = m.changeSetting(1)
+	m = runModelCommands(t, m, cmd)
+	if m.cfg.Sharing.Enabled {
+		t.Fatal("expected sharing setting to be disabled")
+	}
+	if _, err := os.Lstat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected sharing socket removal, got %v", err)
+	}
+}
+
+func TestDataSharingStartFailureDoesNotDisablePreference(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "clk.sock")
+	if err := os.WriteFile(path, []byte("occupied"), 0o600); err != nil {
+		t.Fatalf("write collision file: %v", err)
+	}
+	m := New(config.Default(), config.NewManager("", true))
+	m.sharing = share.NewAt(path)
+	m.cfg.Sharing.Enabled = true
+
+	next, _ := m.Update(m.sharingControlCmd(true)())
+	updated := next.(Model)
+	if !updated.cfg.Sharing.Enabled || !strings.Contains(updated.sharingError, "data sharing failed") {
+		t.Fatalf("expected enabled preference and operational error, got enabled=%v error=%q", updated.cfg.Sharing.Enabled, updated.sharingError)
+	}
+}
+
+func TestCalendarFetchPublishesRawDataToSharingAPI(t *testing.T) {
+	cfg := config.Default()
+	cfg.Time.Format = "utc"
+	cfg.Sharing.Enabled = true
+	addTestCalendarSource(&cfg)
+	m := New(cfg, config.NewManager("", true))
+	m.now = time.Now().UTC()
+	start := m.now.Add(10 * time.Minute)
+	end := start.Add(30 * time.Minute)
+	data := []byte("BEGIN:VCALENDAR\nBEGIN:VEVENT\nSUMMARY:Shared event\nDTSTART:" + start.Format("20060102T150405Z") + "\nDTEND:" + end.Format("20060102T150405Z") + "\nEND:VEVENT\nEND:VCALENDAR\n")
+	events, err := ics.Parse(data, m.now)
+	if err != nil {
+		t.Fatalf("parse test calendar: %v", err)
+	}
+
+	next, _ := m.Update(calendarFetchMsg{url: testCalendarURL, events: events, data: data})
+	updated := next.(Model)
+	recorder := httptest.NewRecorder()
+	updated.sharing.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/events/1h", nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "Shared event") {
+		t.Fatalf("expected shared calendar data, got %d %s", recorder.Code, recorder.Body.String())
 	}
 }
 

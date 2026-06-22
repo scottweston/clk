@@ -32,7 +32,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	program := tea.NewProgram(app.New(cfg, manager), tea.WithAltScreen())
+	model := app.New(cfg, manager)
+	defer func() {
+		_ = model.Close()
+	}()
+	program := tea.NewProgram(model, tea.WithAltScreen())
 	if _, err := program.Run(); err != nil {
 		if !errors.Is(err, tea.ErrProgramKilled) {
 			fmt.Fprintf(os.Stderr, "clk: %v\n", err)

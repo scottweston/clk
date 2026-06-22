@@ -61,3 +61,41 @@ or `Z`. Invalid or mismatched `last_event` values are ignored, and the app falls
 back to launch time until it sees a completed event. Older configs using
 `calendar.url` and a top-level `calendar.last_event` are migrated into
 `calendar.sources` when loaded.
+
+## Event sharing
+
+Event sharing is disabled by default. Enable `Data sharing` in settings or add:
+
+```yaml
+sharing:
+  enabled: true
+```
+
+While `clk` is running, it serves the configured work schedule and latest ICS
+data over HTTP on a per-user Unix socket. The socket is
+`$XDG_RUNTIME_DIR/clk/clk.sock`; when `XDG_RUNTIME_DIR` is unset or invalid it
+falls back to the `clk/clk.sock` path under the user cache directory.
+
+For Bash or Zsh:
+
+```sh
+curl --unix-socket "${XDG_RUNTIME_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}}/clk/clk.sock" http://clk/events/24h | jq
+```
+
+For Fish:
+
+```fish
+curl --unix-socket (string join / (string replace -r '^$' "$HOME/.cache" "$XDG_RUNTIME_DIR") clk clk.sock) http://clk/events/24h | jq
+```
+
+`GET /events` uses a 24-hour window. `GET /events/<time>` accepts a positive
+number followed by `h` for hours, `d` for 24-hour days, or `m` for 30-day
+months. The maximum window is 90 days, so `2160h`, `90d`, and `3m` are valid.
+The JSON response contains `from`, `until`, and a start-time-sorted `events`
+array. Events already in progress are included; completed events and events
+starting at the end of the requested window are excluded.
+
+Each event includes `type`, `summary`, `start`, `end`, and `all_day`. ICS events
+also include an opaque `source_id`; calendar URLs are never returned. The
+socket and its parent directory are restricted to the current user. Sharing
+stops and the socket is removed when the setting is disabled or `clk` exits.

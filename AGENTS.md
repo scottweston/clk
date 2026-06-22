@@ -52,6 +52,7 @@ Current config fields include:
 - `theme.name` and `theme.accent`: built-in theme palette and accent color.
 - `ui.nerd_font`: enables Nerd Font-specific glyph choices where available.
 - `ui.emoji`: switches compact progress labels from Unicode symbols to emoji symbols.
+- `sharing.enabled`: enables the local event-sharing API; defaults to off.
 
 Normalization is intentionally conservative. Unknown enum values fall back to defaults. Old configs with `seconds_style: inline` are migrated to `inline_seconds: true` plus `seconds_style: hidden`.
 
@@ -68,6 +69,7 @@ Normalization is intentionally conservative. Unknown enum values fall back to de
 - Workday progress is 0% before the configured start time, fills to 100% between start and end, remains 100% after the end time, and resets to 0% on the next non-completed workday/off day.
 - Workday, off-day, and ICS event progress rows use compact symbols instead of English status words. Emoji mode uses emoji symbols; non-emoji mode uses plain Unicode symbols. Off-work emoji rotate daily between beach, palm, and home symbols.
 - ICS event titles should be truncated by terminal cell width and should use at most one third of the available progress-row width so the progress bar remains visible.
+- When sharing is enabled, serve `GET /events` and `GET /events/<time>` over the per-user Unix socket. Calendar collection must remain active even when the ICS progress bar is hidden.
 
 ## Testing
 

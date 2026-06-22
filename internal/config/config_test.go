@@ -32,6 +32,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Calendar.ShowProgress || cfg.Calendar.URL != "" || len(cfg.Calendar.Sources) != 0 || cfg.Calendar.Mode != "merged" || cfg.Calendar.RefreshMinutes != 15 {
 		t.Fatalf("unexpected default calendar config: %+v", cfg.Calendar)
 	}
+	if cfg.Sharing.Enabled {
+		t.Fatal("expected data sharing to default to off")
+	}
 	if cfg.UI.Emoji {
 		t.Fatal("expected emoji rendering to default to off")
 	}
@@ -58,6 +61,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 		},
 		{URL: "https://example.com/personal.ics"},
 	}
+	cfg.Sharing.Enabled = true
 	cfg.UI.NerdFont = true
 	cfg.UI.Emoji = true
 
@@ -68,7 +72,7 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	if loaded.Display.DigitStyle != "braille" || loaded.Display.PrideMode != "diagonal" || !loaded.Display.PrideUnlocked || !loaded.UI.NerdFont || !loaded.UI.Emoji || loaded.Calendar.Mode != "split" {
+	if loaded.Display.DigitStyle != "braille" || loaded.Display.PrideMode != "diagonal" || !loaded.Display.PrideUnlocked || !loaded.UI.NerdFont || !loaded.UI.Emoji || loaded.Calendar.Mode != "split" || !loaded.Sharing.Enabled {
 		t.Fatalf("loaded config mismatch: %+v", loaded)
 	}
 	if len(loaded.Calendar.Sources) != 2 {

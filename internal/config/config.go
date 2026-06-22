@@ -23,6 +23,7 @@ type Config struct {
 	Display  DisplayConfig  `yaml:"display"`
 	Workday  WorkdayConfig  `yaml:"workday"`
 	Calendar CalendarConfig `yaml:"calendar"`
+	Sharing  SharingConfig  `yaml:"sharing"`
 	Theme    ThemeConfig    `yaml:"theme"`
 	UI       UIConfig       `yaml:"ui"`
 }
@@ -83,6 +84,10 @@ type CalendarEventConfig struct {
 	End       time.Time `yaml:"end,omitempty"`
 }
 
+type SharingConfig struct {
+	Enabled bool `yaml:"enabled"`
+}
+
 type ThemeConfig struct {
 	Name   string `yaml:"name"`
 	Accent string `yaml:"accent"`
@@ -133,6 +138,7 @@ func Default() Config {
 			Mode:           "merged",
 			RefreshMinutes: 15,
 		},
+		Sharing: SharingConfig{Enabled: false},
 		Theme: ThemeConfig{
 			Name:   "tokyo-night",
 			Accent: "cyan",

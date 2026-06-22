@@ -33,7 +33,7 @@ type Event struct {
 }
 
 func Fetch(ctx context.Context, source string, now time.Time) ([]Event, error) {
-	data, err := fetchData(ctx, source)
+	data, err := FetchData(ctx, source)
 	if err != nil {
 		return nil, err
 	}
@@ -41,25 +41,36 @@ func Fetch(ctx context.Context, source string, now time.Time) ([]Event, error) {
 }
 
 func FetchCached(ctx context.Context, source string, now time.Time, refreshInterval time.Duration) ([]Event, error) {
+	data, err := FetchCachedData(ctx, source, refreshInterval)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data, now)
+}
+
+// FetchData downloads and returns the raw data for an HTTP(S) calendar source.
+func FetchData(ctx context.Context, source string) ([]byte, error) {
+	return fetchData(ctx, source)
+}
+
+// FetchCachedData returns fresh cached calendar data when possible, refreshes a
+// stale cache, and falls back to stale data when the refresh fails.
+func FetchCachedData(ctx context.Context, source string, refreshInterval time.Duration) ([]byte, error) {
 	if refreshInterval <= 0 {
 		refreshInterval = 15 * time.Minute
 	}
 	if data, ok := readFreshCache(source, refreshInterval); ok {
-		if events, err := Parse(data, now); err == nil {
-			return events, nil
-		}
+		return data, nil
 	}
 
 	data, err := fetchData(ctx, source)
 	if err == nil {
 		_ = writeCache(source, data)
-		return Parse(data, now)
+		return data, nil
 	}
 
 	if data, ok := readCache(source); ok {
-		if events, parseErr := Parse(data, now); parseErr == nil {
-			return events, nil
-		}
+		return data, nil
 	}
 	return nil, err
 }
@@ -158,38 +169,13 @@ func cachePath(source string) (string, error) {
 }
 
 func Parse(data []byte, now time.Time) ([]Event, error) {
-	lines := unfoldLines(string(data))
+	rawEvents := parseRawEvents(data)
 	candidates := make([]Event, 0)
-	var current *rawEvent
-
-	for _, line := range lines {
-		name, params, value, ok := parseContentLine(line)
-		if !ok {
-			continue
-		}
-		switch name {
-		case "BEGIN":
-			if strings.EqualFold(value, "VEVENT") {
-				current = &rawEvent{}
-			}
-		case "END":
-			if strings.EqualFold(value, "VEVENT") && current != nil {
-				candidates = append(candidates, current.expand(now)...)
-				current = nil
-			}
-		default:
-			if current != nil {
-				current.set(name, params, value)
-			}
-		}
+	for _, event := range rawEvents {
+		candidates = append(candidates, event.expand(now)...)
 	}
 
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].Start.Equal(candidates[j].Start) {
-			return candidates[i].End.Before(candidates[j].End)
-		}
-		return candidates[i].Start.Before(candidates[j].Start)
-	})
+	sortEvents(candidates)
 
 	events := make([]Event, 0, len(candidates))
 	var previous Event
@@ -212,6 +198,61 @@ func Parse(data []byte, now time.Time) ([]Event, error) {
 		events = events[:maxReturned]
 	}
 	return events, nil
+}
+
+// ParseRange returns every event that intersects the half-open interval
+// [from, until). Unlike Parse, it does not retain a completed baseline event or
+// impose the renderer-oriented 64 event limit.
+func ParseRange(data []byte, from, until time.Time) ([]Event, error) {
+	if from.IsZero() || until.IsZero() || !until.After(from) {
+		return nil, fmt.Errorf("invalid event range")
+	}
+
+	rawEvents := parseRawEvents(data)
+	events := make([]Event, 0)
+	for _, event := range rawEvents {
+		events = append(events, event.expandRange(from, until)...)
+	}
+	sortEvents(events)
+	return events, nil
+}
+
+func parseRawEvents(data []byte) []rawEvent {
+	lines := unfoldLines(string(data))
+	events := make([]rawEvent, 0)
+	var current *rawEvent
+
+	for _, line := range lines {
+		name, params, value, ok := parseContentLine(line)
+		if !ok {
+			continue
+		}
+		switch name {
+		case "BEGIN":
+			if strings.EqualFold(value, "VEVENT") {
+				current = &rawEvent{}
+			}
+		case "END":
+			if strings.EqualFold(value, "VEVENT") && current != nil {
+				events = append(events, *current)
+				current = nil
+			}
+		default:
+			if current != nil {
+				current.set(name, params, value)
+			}
+		}
+	}
+	return events
+}
+
+func sortEvents(events []Event) {
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].Start.Equal(events[j].Start) {
+			return events[i].End.Before(events[j].End)
+		}
+		return events[i].Start.Before(events[j].Start)
+	})
 }
 
 type rawEvent struct {
@@ -285,6 +326,26 @@ func (e rawEvent) expand(now time.Time) []Event {
 	}
 
 	return e.expandRecurring(now, duration)
+}
+
+func (e rawEvent) expandRange(from, until time.Time) []Event {
+	if !e.hasStart {
+		return nil
+	}
+	duration := e.eventEnd().Sub(e.start)
+	if duration <= 0 {
+		duration = time.Minute
+	}
+
+	if len(e.rrule) == 0 {
+		event := Event{Summary: e.summary, Start: e.start, End: e.start.Add(duration), AllDay: e.allDay}
+		if event.End.After(from) && event.Start.Before(until) {
+			return []Event{event}
+		}
+		return nil
+	}
+
+	return e.expandRecurringRange(from, until, duration)
 }
 
 func (e rawEvent) eventEnd() time.Time {
@@ -377,6 +438,110 @@ func (e rawEvent) expandRecurring(now time.Time, duration time.Duration) []Event
 		out = append([]Event{previous}, out...)
 	}
 	return out
+}
+
+func (e rawEvent) expandRecurringRange(from, until time.Time, duration time.Duration) []Event {
+	freq := strings.ToUpper(e.rrule["FREQ"])
+	interval := parsePositiveInt(e.rrule["INTERVAL"], 1)
+	countLimit := parsePositiveInt(e.rrule["COUNT"], 0)
+	untilRule, hasUntil := parseUntil(e.rrule["UNTIL"], e.start.Location())
+	earliest := from.Add(-duration)
+	out := make([]Event, 0)
+
+	addOccurrence := func(start time.Time) {
+		end := start.Add(duration)
+		if e.exdates[eventKey(start)] || !end.After(from) || !start.Before(until) {
+			return
+		}
+		out = append(out, Event{Summary: e.summary, Start: start, End: end, AllDay: e.allDay})
+	}
+
+	byday := parseByDay(e.rrule["BYDAY"])
+	if (freq == "WEEKLY" || freq == "DAILY") && len(byday) > 0 {
+		current := dateOnly(e.start)
+		generated := 0
+		if countLimit == 0 && earliest.After(e.start) {
+			current = dateOnly(earliest)
+		}
+		for i := 0; i < maxExpanded; i++ {
+			candidate := time.Date(current.Year(), current.Month(), current.Day(), e.start.Hour(), e.start.Minute(), e.start.Second(), e.start.Nanosecond(), e.start.Location())
+			if candidate.After(until) || (hasUntil && candidate.After(untilRule)) {
+				break
+			}
+			if !candidate.Before(e.start) && weekdayAllowed(candidate.Weekday(), byday) && recurrenceIntervalMatches(freq, interval, e.start, candidate) {
+				generated++
+				if countLimit > 0 && generated > countLimit {
+					break
+				}
+				addOccurrence(candidate)
+			}
+			current = current.AddDate(0, 0, 1)
+		}
+		return out
+	}
+
+	current := e.start
+	generated := 0
+	if countLimit == 0 && earliest.After(current) {
+		current = fastForwardRecurring(current, freq, interval, earliest)
+	}
+	for i := 0; i < maxExpanded; i++ {
+		if current.After(until) || (hasUntil && current.After(untilRule)) {
+			break
+		}
+		generated++
+		if countLimit > 0 && generated > countLimit {
+			break
+		}
+		addOccurrence(current)
+		next, ok := nextRecurringTime(current, freq, interval)
+		if !ok {
+			break
+		}
+		current = next
+	}
+	return out
+}
+
+func fastForwardRecurring(start time.Time, freq string, interval int, target time.Time) time.Time {
+	current := start
+	switch freq {
+	case "DAILY":
+		days := calendarDayNumber(target) - calendarDayNumber(start)
+		if days > interval {
+			current = start.AddDate(0, 0, (days/interval)*interval)
+		}
+	case "WEEKLY":
+		days := calendarDayNumber(target) - calendarDayNumber(start)
+		step := 7 * interval
+		if days > step {
+			current = start.AddDate(0, 0, (days/step)*step)
+		}
+	case "MONTHLY":
+		months := (target.Year()-start.Year())*12 + int(target.Month()-start.Month())
+		if months > interval {
+			current = start.AddDate(0, (months/interval)*interval, 0)
+		}
+	case "YEARLY":
+		years := target.Year() - start.Year()
+		if years > interval {
+			current = start.AddDate((years/interval)*interval, 0, 0)
+		}
+	default:
+		return start
+	}
+	for current.Before(target) {
+		next, ok := nextRecurringTime(current, freq, interval)
+		if !ok {
+			return start
+		}
+		current = next
+	}
+	return current
+}
+
+func calendarDayNumber(value time.Time) int {
+	return int(time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC).Unix() / int64(24*time.Hour/time.Second))
 }
 
 func unfoldLines(data string) []string {
@@ -517,7 +682,7 @@ func weekdayAllowed(day time.Weekday, allowed []time.Weekday) bool {
 }
 
 func recurrenceIntervalMatches(freq string, interval int, start, candidate time.Time) bool {
-	days := int(dateOnly(candidate).Sub(dateOnly(start)).Hours() / 24)
+	days := calendarDayNumber(candidate) - calendarDayNumber(start)
 	if days < 0 {
 		return false
 	}

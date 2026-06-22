@@ -2,6 +2,7 @@ package ics
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -129,6 +130,85 @@ END:VCALENDAR
 	}
 	if events[0].Summary != "Recent" || events[1].Summary != "Next" {
 		t.Fatalf("expected most recent completed event before next event, got %+v", events)
+	}
+}
+
+func TestParseRangeReturnsEveryIntersectingEventWithoutRendererLimit(t *testing.T) {
+	from := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	var calendar strings.Builder
+	calendar.WriteString("BEGIN:VCALENDAR\n")
+	for i := 0; i < 70; i++ {
+		start := from.Add(time.Duration(i) * time.Hour)
+		end := start.Add(30 * time.Minute)
+		_, _ = fmt.Fprintf(&calendar, "BEGIN:VEVENT\nSUMMARY:Event %02d\nDTSTART:%s\nDTEND:%s\nEND:VEVENT\n", i, start.Format("20060102T150405Z"), end.Format("20060102T150405Z"))
+	}
+	calendar.WriteString("END:VCALENDAR\n")
+
+	events, err := ParseRange([]byte(calendar.String()), from, from.Add(4*24*time.Hour))
+	if err != nil {
+		t.Fatalf("parse range: %v", err)
+	}
+	if len(events) != 70 {
+		t.Fatalf("expected all 70 range events, got %d", len(events))
+	}
+}
+
+func TestParseRangeIncludesActiveAndExcludesHalfOpenBoundaries(t *testing.T) {
+	from := time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
+	until := from.Add(time.Hour)
+	data := []byte(`BEGIN:VCALENDAR
+BEGIN:VEVENT
+SUMMARY:Ended
+DTSTART:20260606T090000Z
+DTEND:20260606T100000Z
+END:VEVENT
+BEGIN:VEVENT
+SUMMARY:Active
+DTSTART:20260606T093000Z
+DTEND:20260606T103000Z
+END:VEVENT
+BEGIN:VEVENT
+SUMMARY:At end
+DTSTART:20260606T110000Z
+DTEND:20260606T113000Z
+END:VEVENT
+END:VCALENDAR
+`)
+
+	events, err := ParseRange(data, from, until)
+	if err != nil {
+		t.Fatalf("parse range: %v", err)
+	}
+	if len(events) != 1 || events[0].Summary != "Active" || !events[0].Start.Before(from) {
+		t.Fatalf("unexpected half-open range events: %+v", events)
+	}
+}
+
+func TestParseRangeFastForwardsOldUnboundedRecurrence(t *testing.T) {
+	from := time.Date(2026, 6, 6, 0, 0, 0, 0, time.UTC)
+	data := []byte(`BEGIN:VCALENDAR
+BEGIN:VEVENT
+SUMMARY:Daily
+DTSTART:19000101T090000Z
+DURATION:PT1H
+RRULE:FREQ=DAILY
+END:VEVENT
+END:VCALENDAR
+`)
+
+	events, err := ParseRange(data, from, from.Add(3*24*time.Hour))
+	if err != nil {
+		t.Fatalf("parse range: %v", err)
+	}
+	if len(events) != 3 || events[0].Start.Year() != 2026 || events[0].Start.Day() != 6 {
+		t.Fatalf("expected three current recurring events, got %+v", events)
+	}
+}
+
+func TestParseRangeRejectsInvalidRange(t *testing.T) {
+	now := time.Now()
+	if _, err := ParseRange(nil, now, now); err == nil {
+		t.Fatal("expected invalid range error")
 	}
 }
 

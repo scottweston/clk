@@ -21,6 +21,7 @@ import (
 	"clk/internal/ics"
 	"clk/internal/locale"
 	"clk/internal/render"
+	"clk/internal/share"
 	"clk/internal/theme"
 )
 
@@ -48,6 +49,9 @@ type Model struct {
 	urlInput         textarea.Model
 	saveError        string
 	calendarEvents   map[string][]ics.Event
+	calendarData     map[string][]byte
+	sharing          *share.Service
+	sharingError     string
 	help             help.Model
 	progress         progress.Model
 	keys             keyMap
@@ -62,6 +66,13 @@ type calendarRefreshMsg struct{}
 type calendarFetchMsg struct {
 	url    string
 	events []ics.Event
+	data   []byte
+	err    error
+}
+
+type sharingStatusMsg struct {
+	enabled bool
+	err     error
 }
 
 type prideUnlockMsg struct{}
@@ -92,6 +103,8 @@ func New(cfg config.Config, manager config.Manager) Model {
 		startedAt:      now,
 		urlInput:       newCalendarURLInput(),
 		calendarEvents: make(map[string][]ics.Event),
+		calendarData:   make(map[string][]byte),
+		sharing:        share.New(),
 		help:           help.New(),
 		progress:       newProgressModel(cfg),
 		keys:           keys,
@@ -101,7 +114,15 @@ func New(cfg config.Config, manager config.Manager) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd(), m.prideUnlockCmd())
+	m.publishSharingSnapshot()
+	return tea.Batch(tick(), m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd(), m.prideUnlockCmd(), m.sharingControlCmd(m.cfg.Sharing.Enabled))
+}
+
+func (m Model) Close() error {
+	if m.sharing == nil {
+		return nil
+	}
+	return m.sharing.Close()
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -117,6 +138,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case calendarRefreshMsg:
 		return m, tea.Batch(m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
 	case calendarFetchMsg:
+		if msg.err != nil {
+			return m, nil
+		}
 		if !calendarHasSource(m.cfg.Calendar, msg.url) {
 			return m, nil
 		}
@@ -124,7 +148,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.calendarEvents = make(map[string][]ics.Event)
 		}
 		m.calendarEvents[msg.url] = msg.events
+		if msg.data != nil {
+			if m.calendarData == nil {
+				m.calendarData = make(map[string][]byte)
+			}
+			m.calendarData[msg.url] = append([]byte(nil), msg.data...)
+			m.publishSharingSnapshot()
+		}
 		m.rememberPastCalendarEvent(m.displayTime())
+	case sharingStatusMsg:
+		if msg.enabled != m.cfg.Sharing.Enabled {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.sharingError = fmt.Sprintf("data sharing failed: %v", msg.err)
+		} else {
+			m.sharingError = ""
+		}
 	case prideUnlockMsg:
 		m.unlockPrideIfNeeded(m.displayTime())
 	case tea.KeyMsg:
@@ -146,6 +186,9 @@ func (m Model) View() string {
 	}
 	if m.saveError != "" {
 		content = joinVerticalWithBackground(lipgloss.Center, p.Background, content, styles.Error.Render(m.saveError))
+	}
+	if m.sharingError != "" {
+		content = joinVerticalWithBackground(lipgloss.Center, p.Background, content, styles.Error.Render(m.sharingError))
 	}
 
 	if m.width <= 0 || m.height <= 0 {
@@ -324,18 +367,27 @@ func (m *Model) changeSetting(delta int) tea.Cmd {
 		return nil
 	}
 	beforeCalendar := m.cfg.Calendar
+	beforeSharing := m.cfg.Sharing.Enabled
 	items[m.cursor].change(delta, &m.cfg)
 	m.cfg.Normalize()
 	m.updateProgressColors()
 	if err := m.manager.Save(m.cfg); err != nil {
 		m.saveError = fmt.Sprintf("config save failed: %v", err)
-		return nil
+	} else {
+		m.saveError = ""
 	}
-	m.saveError = ""
+	m.publishSharingSnapshot()
+	cmds := make([]tea.Cmd, 0, 3)
 	if calendarRefreshChanged(beforeCalendar, m.cfg.Calendar) {
-		return tea.Batch(m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
+		cmds = append(cmds, m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
 	}
-	return nil
+	if beforeSharing != m.cfg.Sharing.Enabled {
+		cmds = append(cmds, m.sharingControlCmd(m.cfg.Sharing.Enabled))
+		if !calendarRefreshChanged(beforeCalendar, m.cfg.Calendar) {
+			cmds = append(cmds, m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) toggleWorkday(day string) {
@@ -371,6 +423,7 @@ func (m *Model) changeWorkdayTime(delta int) {
 
 func (m *Model) saveConfig() {
 	m.cfg.Normalize()
+	m.publishSharingSnapshot()
 	if err := m.manager.Save(m.cfg); err != nil {
 		m.saveError = fmt.Sprintf("config save failed: %v", err)
 		return
@@ -1024,6 +1077,7 @@ func (m Model) settingItems() []settingItem {
 	items = append(items,
 		toggleItem("Workday bar", func(c config.Config) bool { return c.Workday.ShowProgress }, func(v bool, c *config.Config) { c.Workday.ShowProgress = v }),
 		toggleItem("ICS bar", func(c config.Config) bool { return c.Calendar.ShowProgress }, func(v bool, c *config.Config) { c.Calendar.ShowProgress = v }),
+		toggleItem("Data sharing", func(c config.Config) bool { return c.Sharing.Enabled }, func(v bool, c *config.Config) { c.Sharing.Enabled = v }),
 		cycleItem("ICS mode", func(c config.Config) string { return c.Calendar.Mode }, func(v string, c *config.Config) { c.Calendar.Mode = v }, config.CalendarModes),
 		submenuItem("ICS URLs", func(c config.Config) string { return calendarURLSummary(c.Calendar) }, "calendar_url"),
 		submenuItem("Work schedule", func(c config.Config) string { return workdayScheduleSummary(c.Workday) }, "workdays"),
@@ -1415,9 +1469,6 @@ func equalStringSlices(a, b []string) bool {
 }
 
 func (m *Model) pruneCalendarEvents() {
-	if len(m.calendarEvents) == 0 {
-		return
-	}
 	keep := make(map[string]bool, len(m.cfg.Calendar.Sources))
 	for _, source := range m.cfg.Calendar.Sources {
 		keep[source.URL] = true
@@ -1427,6 +1478,12 @@ func (m *Model) pruneCalendarEvents() {
 			delete(m.calendarEvents, url)
 		}
 	}
+	for url := range m.calendarData {
+		if !keep[url] {
+			delete(m.calendarData, url)
+		}
+	}
+	m.publishSharingSnapshot()
 }
 
 func containsString(values []string, value string) bool {
@@ -1469,7 +1526,7 @@ func removeString(values []string, value string) []string {
 
 func (m Model) fetchCalendarCmd() tea.Cmd {
 	cfg := m.cfg.Calendar
-	if !cfg.ShowProgress || len(cfg.Sources) == 0 {
+	if !calendarDataNeeded(m.cfg) || len(cfg.Sources) == 0 {
 		return nil
 	}
 	now := m.displayTime()
@@ -1480,8 +1537,12 @@ func (m Model) fetchCalendarCmd() tea.Cmd {
 		cmds = append(cmds, func() tea.Msg {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			events, _ := ics.FetchCached(ctx, url, now, refresh)
-			return calendarFetchMsg{url: url, events: events}
+			data, err := ics.FetchCachedData(ctx, url, refresh)
+			if err != nil {
+				return calendarFetchMsg{url: url, err: err}
+			}
+			events, err := ics.Parse(data, now)
+			return calendarFetchMsg{url: url, events: events, data: data, err: err}
 		})
 	}
 	return tea.Batch(cmds...)
@@ -1489,7 +1550,7 @@ func (m Model) fetchCalendarCmd() tea.Cmd {
 
 func (m Model) scheduleCalendarRefreshCmd() tea.Cmd {
 	cfg := m.cfg.Calendar
-	if !cfg.ShowProgress || len(cfg.Sources) == 0 {
+	if !calendarDataNeeded(m.cfg) || len(cfg.Sources) == 0 {
 		return nil
 	}
 	refresh := cfg.RefreshMinutes
@@ -1498,6 +1559,41 @@ func (m Model) scheduleCalendarRefreshCmd() tea.Cmd {
 	}
 	return tea.Tick(time.Duration(refresh)*time.Minute, func(time.Time) tea.Msg {
 		return calendarRefreshMsg{}
+	})
+}
+
+func calendarDataNeeded(cfg config.Config) bool {
+	return cfg.Calendar.ShowProgress || cfg.Sharing.Enabled
+}
+
+func (m Model) sharingControlCmd(enabled bool) tea.Cmd {
+	if m.sharing == nil {
+		return nil
+	}
+	service := m.sharing
+	return func() tea.Msg {
+		var err error
+		if enabled {
+			err = service.Start()
+		} else {
+			err = service.Stop()
+		}
+		return sharingStatusMsg{enabled: enabled, err: err}
+	}
+}
+
+func (m Model) publishSharingSnapshot() {
+	if m.sharing == nil {
+		return
+	}
+	sources := make([]share.SourceData, 0, len(m.cfg.Calendar.Sources))
+	for _, source := range m.cfg.Calendar.Sources {
+		sources = append(sources, share.SourceData{URL: source.URL, Data: m.calendarData[source.URL]})
+	}
+	m.sharing.Publish(share.Snapshot{
+		Time:    m.cfg.Time,
+		Workday: m.cfg.Workday,
+		Sources: sources,
 	})
 }
 
