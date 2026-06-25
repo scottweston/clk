@@ -34,6 +34,7 @@ type Model struct {
 	startedAt        time.Time
 	settings         bool
 	helpOpen         bool
+	eventPeek        bool
 	cursor           int
 	scrollOffset     int
 	dayScrollOffset  int
@@ -195,7 +196,7 @@ func (m Model) View() string {
 		return content
 	}
 
-	return lipgloss.Place(
+	screen := lipgloss.Place(
 		m.width,
 		m.height,
 		horizontalPosition(m.cfg.Display.Alignment),
@@ -203,6 +204,10 @@ func (m Model) View() string {
 		content,
 		lipgloss.WithWhitespaceBackground(lipgloss.Color(p.Background)),
 	)
+	if m.eventPeekOpen() && !m.settings && !m.helpOpen {
+		return placeOverlay(screen, m.eventPeekView(styles, p), m.width, m.height, p.Background)
+	}
+	return screen
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -215,12 +220,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Help):
 		m.helpOpen = !m.helpOpen
+		m.eventPeek = false
 	case key.Matches(msg, m.keys.Settings):
 		m.settings = !m.settings
 		m.helpOpen = false
+		m.eventPeek = false
+	case !m.settings && !m.helpOpen && key.Matches(msg, m.keys.Events):
+		m.eventPeek = !m.eventPeek
 	case key.Matches(msg, m.keys.Back):
 		if m.helpOpen {
 			m.helpOpen = false
+		} else if m.eventPeek {
+			m.eventPeek = false
 		} else if m.workdays {
 			m.workdays = false
 		} else if m.settings {
@@ -1261,6 +1272,301 @@ func (m Model) calendarProgressView(now time.Time, width int) string {
 	return strings.Join(rows, "\n\n")
 }
 
+func (m Model) eventPeekOpen() bool {
+	return m.eventPeek
+}
+
+func (m Model) eventPeekView(styles theme.Stylesheet, palette theme.Palette) string {
+	if m.width < 12 || m.height < 5 {
+		return ""
+	}
+
+	contentWidth := m.width - 8
+	if contentWidth > 72 {
+		contentWidth = 72
+	}
+	if contentWidth < 24 {
+		contentWidth = m.width - 4
+	}
+	if contentWidth < 8 {
+		return ""
+	}
+
+	contentRows := m.height - 4
+	if contentRows < 1 {
+		return ""
+	}
+	rowWidth := contentWidth - 4
+	if rowWidth < 8 {
+		return ""
+	}
+
+	now := m.displayTime()
+	events := upcomingCalendarEvents(m.cfg.Calendar, m.calendarEvents, now)
+	titleBarStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(palette.Background)).
+		Background(lipgloss.Color(palette.Foreground)).
+		Bold(true).
+		Width(rowWidth).
+		Align(lipgloss.Center)
+	rows := []string{titleBarStyle.Render("Schedule for the next week")}
+	timeWidth := eventPeekTimeWidth(events, now)
+	if timeWidth > rowWidth/2 {
+		timeWidth = rowWidth / 2
+	}
+	titleWidth := rowWidth - timeWidth - 2
+	if titleWidth < 8 {
+		titleWidth = rowWidth
+		timeWidth = 0
+	}
+
+	timeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(theme.Accent(palette, m.cfg.Theme.Accent))).
+		Background(lipgloss.Color(palette.Background)).
+		Bold(true)
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(palette.Foreground)).
+		Background(lipgloss.Color(palette.Background))
+	gapStyle := lipgloss.NewStyle().Background(lipgloss.Color(palette.Background))
+
+	for _, event := range events {
+		label := eventPeekTimeLabel(event, now)
+		title := strings.TrimSpace(event.Summary)
+		if title == "" {
+			title = "Untitled event"
+		}
+		titleLines := wrapCells(title, titleWidth, 2)
+		eventRows := len(titleLines)
+		if len(rows)+eventRows > contentRows {
+			break
+		}
+		for i, line := range titleLines {
+			if timeWidth == 0 {
+				rows = append(rows, titleStyle.Render(line))
+				continue
+			}
+			timeText := ""
+			if i == 0 {
+				timeText = label
+			}
+			rows = append(rows,
+				timeStyle.Width(timeWidth).Render(timeText)+
+					gapStyle.Render("  ")+
+					titleStyle.Render(line),
+			)
+		}
+	}
+	if len(rows) == 1 && contentRows > 1 {
+		rows = append(rows, styles.Muted.Render("No upcoming ICS events"))
+	}
+
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(palette.Foreground)).
+		Background(lipgloss.Color(palette.Background)).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(theme.Accent(palette, m.cfg.Theme.Accent))).
+		BorderBackground(lipgloss.Color(palette.Background)).
+		Padding(1, 2).
+		Width(contentWidth).
+		Render(strings.Join(rows, "\n"))
+}
+
+func upcomingCalendarEvents(cfg config.CalendarConfig, bySource map[string][]ics.Event, now time.Time) []ics.Event {
+	events := make([]ics.Event, 0)
+	for _, source := range cfg.Sources {
+		for _, event := range bySource[source.URL] {
+			if !calendarEventUpcomingWithinSixDays(event, now) {
+				continue
+			}
+			events = append(events, event)
+		}
+	}
+	sort.SliceStable(events, func(i, j int) bool {
+		if !events[i].Start.Equal(events[j].Start) {
+			return events[i].Start.Before(events[j].Start)
+		}
+		if !events[i].End.Equal(events[j].End) {
+			return events[i].End.Before(events[j].End)
+		}
+		return events[i].Summary < events[j].Summary
+	})
+	return events
+}
+
+func calendarEventUpcomingWithinSixDays(event ics.Event, now time.Time) bool {
+	if event.Start.IsZero() {
+		return false
+	}
+	end := event.End
+	if !end.After(event.Start) {
+		end = event.Start.Add(time.Minute)
+	}
+	if !end.After(now) {
+		return false
+	}
+	day := daysBetween(now, event.Start)
+	return day >= 0 && day <= 6
+}
+
+func eventPeekTimeWidth(events []ics.Event, now time.Time) int {
+	width := lipgloss.Width("tomorrow")
+	for _, event := range events {
+		width = max(width, lipgloss.Width(eventPeekTimeLabel(event, now)))
+	}
+	return width
+}
+
+func eventPeekTimeLabel(event ics.Event, now time.Time) string {
+	start := event.Start.In(now.Location())
+	if !start.After(now) {
+		return "now"
+	}
+	day := daysBetween(now, start)
+	switch {
+	case day == 0:
+		if event.AllDay {
+			return "today"
+		}
+		until := start.Sub(now)
+		if until < 90*time.Minute {
+			minutes := int(math.Ceil(until.Minutes()))
+			if minutes < 1 {
+				minutes = 1
+			}
+			if minutes == 1 {
+				return "in 1 min"
+			}
+			return fmt.Sprintf("in %d min", minutes)
+		}
+		if until < 6*time.Hour {
+			hours := int(math.Round(until.Hours()))
+			if hours < 1 {
+				hours = 1
+			}
+			if hours == 1 {
+				return "in 1 hour"
+			}
+			return fmt.Sprintf("in %d hours", hours)
+		}
+		switch {
+		case start.Hour() < 12:
+			return "this morning " + eventPeekHourLabel(start)
+		case start.Hour() < 17:
+			return "this afternoon " + eventPeekHourLabel(start)
+		default:
+			return "this evening " + eventPeekHourLabel(start)
+		}
+	case day == 1:
+		if event.AllDay {
+			return "tomorrow"
+		}
+		return "tomorrow " + eventPeekHourLabel(start)
+	default:
+		if event.AllDay {
+			return start.Weekday().String()
+		}
+		return start.Weekday().String() + " " + eventPeekHourLabel(start)
+	}
+}
+
+func eventPeekHourLabel(value time.Time) string {
+	hour := value.Hour()
+	suffix := "am"
+	if hour >= 12 {
+		suffix = "pm"
+	}
+	hour %= 12
+	if hour == 0 {
+		hour = 12
+	}
+	prefix := ""
+	if value.Minute() != 0 || value.Second() != 0 || value.Nanosecond() != 0 {
+		prefix = "~"
+	}
+	return fmt.Sprintf("%s%d%s", prefix, hour, suffix)
+}
+
+func daysBetween(from, to time.Time) int {
+	to = to.In(from.Location())
+	fromDate := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
+	toDate := time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC)
+	return int(toDate.Sub(fromDate) / (24 * time.Hour))
+}
+
+func wrapCells(value string, width, maxLines int) []string {
+	if maxLines <= 0 || width <= 0 {
+		return nil
+	}
+	words := strings.Fields(value)
+	if len(words) == 0 {
+		return []string{""}
+	}
+
+	lines := make([]string, 0, maxLines)
+	current := ""
+	truncated := false
+	for i := 0; i < len(words); i++ {
+		word := words[i]
+		candidate := word
+		if current != "" {
+			candidate = current + " " + word
+		}
+		if lipgloss.Width(candidate) <= width {
+			current = candidate
+			continue
+		}
+		if current != "" {
+			lines = append(lines, current)
+			current = ""
+			if len(lines) >= maxLines {
+				truncated = true
+				break
+			}
+			i--
+			continue
+		}
+		lines = append(lines, truncateCells(word, width))
+		truncated = true
+		break
+	}
+	if current != "" && len(lines) < maxLines {
+		lines = append(lines, current)
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "")
+	}
+	if truncated {
+		lines[len(lines)-1] = appendDots(lines[len(lines)-1], width)
+	}
+	return lines
+}
+
+func truncateCells(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(value) <= width {
+		return value
+	}
+	var b strings.Builder
+	for _, r := range value {
+		next := b.String() + string(r)
+		if lipgloss.Width(next) > width {
+			break
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func appendDots(value string, width int) string {
+	if width <= 3 {
+		return truncateCells(strings.Repeat(".", width), width)
+	}
+	value = truncateCells(value, width-3)
+	return value + "..."
+}
+
 func calendarOptions(events []ics.Event, baseline time.Time, source config.CalendarSourceConfig, now time.Time, emoji bool) render.CalendarOptions {
 	out := make([]render.CalendarEventOptions, 0, len(events)+1)
 	for _, event := range events {
@@ -1649,6 +1955,41 @@ func joinVerticalWithBackground(position lipgloss.Position, background string, b
 	return strings.Join(out, "\n")
 }
 
+func placeOverlay(screen, overlay string, width, height int, background string) string {
+	if overlay == "" || width <= 0 || height <= 0 {
+		return screen
+	}
+	screenLines := strings.Split(screen, "\n")
+	for len(screenLines) < height {
+		screenLines = append(screenLines, "")
+	}
+	if len(screenLines) > height {
+		screenLines = screenLines[:height]
+	}
+
+	overlayLines := strings.Split(overlay, "\n")
+	if len(overlayLines) > height {
+		overlayLines = overlayLines[:height]
+	}
+	top := (height - len(overlayLines)) / 2
+	if top < 0 {
+		top = 0
+	}
+	for i, line := range overlayLines {
+		row := top + i
+		if row < 0 || row >= len(screenLines) {
+			continue
+		}
+		screenLines[row] = lipgloss.PlaceHorizontal(
+			width,
+			lipgloss.Center,
+			line,
+			lipgloss.WithWhitespaceBackground(lipgloss.Color(background)),
+		)
+	}
+	return strings.Join(screenLines, "\n")
+}
+
 func paddingFor(position lipgloss.Position, total int) (int, int) {
 	if total <= 0 {
 		return 0, 0
@@ -1683,15 +2024,16 @@ type keyMap struct {
 	Left     key.Binding
 	Right    key.Binding
 	Choose   key.Binding
+	Events   key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Settings, k.Help, k.Quit}
+	return []key.Binding{k.Settings, k.Events, k.Help, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Settings, k.Help, k.Back, k.Quit},
+		{k.Settings, k.Events, k.Help, k.Back, k.Quit},
 		{k.Up, k.Down, k.Left, k.Right, k.Choose},
 	}
 }
@@ -1732,5 +2074,9 @@ var keys = keyMap{
 	Choose: key.NewBinding(
 		key.WithKeys("enter", " "),
 		key.WithHelp("enter", "change"),
+	),
+	Events: key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "events"),
 	),
 }

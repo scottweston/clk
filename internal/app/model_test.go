@@ -695,6 +695,184 @@ func TestCalendarProgressBarCountsDownFromRememberedLastEvent(t *testing.T) {
 	}
 }
 
+func TestEventPeekTogglesAndListsUpcomingEvents(t *testing.T) {
+	now := time.Date(2026, 5, 4, 9, 0, 0, 0, time.Local)
+	cfg := config.Default()
+	addTestCalendarSource(&cfg)
+	m := New(cfg, config.NewManager("", true))
+	m.width = 90
+	m.height = 24
+	m.now = now
+	setTestCalendarEvents(&m, []ics.Event{
+		{
+			Summary: "Finished",
+			Start:   now.Add(-2 * time.Hour),
+			End:     now.Add(-time.Hour),
+		},
+		{
+			Summary: "Planning",
+			Start:   now.Add(3 * time.Hour),
+			End:     now.Add(4 * time.Hour),
+		},
+		{
+			Summary: "Dinner",
+			Start:   time.Date(2026, 5, 4, 19, 0, 0, 0, time.Local),
+			End:     time.Date(2026, 5, 4, 20, 0, 0, 0, time.Local),
+		},
+		{
+			Summary: "Tomorrow Standup",
+			Start:   now.AddDate(0, 0, 1),
+			End:     now.AddDate(0, 0, 1).Add(time.Hour),
+		},
+		{
+			Summary: "Sunday Review",
+			Start:   now.AddDate(0, 0, 6),
+			End:     now.AddDate(0, 0, 6).Add(time.Hour),
+		},
+		{
+			Summary: "Too Far",
+			Start:   now.AddDate(0, 0, 7),
+			End:     now.AddDate(0, 0, 7).Add(time.Hour),
+		},
+	})
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	updated := next.(Model)
+	out := updated.View()
+	for _, want := range []string{"╭", "Schedule for the next week", "in 3 hours", "this evening", "tomorrow", "Sunday", "Planning"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected event peek to include %q, got %q", want, out)
+		}
+	}
+	for _, notWant := range []string{"Finished", "Too Far"} {
+		if strings.Contains(out, notWant) {
+			t.Fatalf("expected event peek to exclude %q, got %q", notWant, out)
+		}
+	}
+
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	updated = next.(Model)
+	if out := updated.View(); strings.Contains(out, "Planning") {
+		t.Fatalf("expected second e key to close event peek, got %q", out)
+	}
+}
+
+func TestEventPeekClosesOnEscape(t *testing.T) {
+	now := time.Date(2026, 5, 4, 9, 0, 0, 0, time.Local)
+	cfg := config.Default()
+	addTestCalendarSource(&cfg)
+	m := New(cfg, config.NewManager("", true))
+	m.width = 90
+	m.height = 24
+	m.now = now
+	setTestCalendarEvents(&m, []ics.Event{
+		{
+			Summary: "Planning",
+			Start:   now.Add(time.Hour),
+			End:     now.Add(2 * time.Hour),
+		},
+	})
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'e'}})
+	updated := next.(Model)
+	next, _ = updated.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated = next.(Model)
+	if updated.eventPeek {
+		t.Fatal("expected esc to close event peek")
+	}
+	if out := updated.View(); strings.Contains(out, "Planning") {
+		t.Fatalf("expected closed event peek to hide event, got %q", out)
+	}
+}
+
+func TestEventPeekOnlyRendersEventsThatFit(t *testing.T) {
+	now := time.Date(2026, 5, 4, 9, 0, 0, 0, time.Local)
+	cfg := config.Default()
+	addTestCalendarSource(&cfg)
+	m := New(cfg, config.NewManager("", true))
+	m.width = 44
+	m.height = 8
+	m.now = now
+	setTestCalendarEvents(&m, []ics.Event{
+		{
+			Summary: "Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel",
+			Start:   now.Add(time.Hour),
+			End:     now.Add(2 * time.Hour),
+		},
+		{
+			Summary: "Second",
+			Start:   now.Add(2 * time.Hour),
+			End:     now.Add(3 * time.Hour),
+		},
+		{
+			Summary: "Third",
+			Start:   now.Add(3 * time.Hour),
+			End:     now.Add(4 * time.Hour),
+		},
+	})
+
+	view := m.eventPeekView(testStyles(), theme.Lookup("tokyo-night"))
+	if lines := strings.Split(view, "\n"); len(lines) > m.height {
+		t.Fatalf("expected peek modal height <= %d, got %d in %q", m.height, len(lines), view)
+	}
+	if !strings.Contains(view, "Second") {
+		t.Fatalf("expected second event to fit, got %q", view)
+	}
+	if strings.Contains(view, "Third") {
+		t.Fatalf("expected third event not to fit, got %q", view)
+	}
+}
+
+func TestEventPeekTimeLabelUsesDisplayTimezone(t *testing.T) {
+	loc := time.FixedZone("Display", 10*60*60)
+	now := time.Date(2026, 5, 4, 9, 0, 0, 0, loc)
+	event := ics.Event{
+		Summary: "Dinner",
+		Start:   time.Date(2026, 5, 4, 8, 0, 0, 0, time.UTC),
+		End:     time.Date(2026, 5, 4, 9, 0, 0, 0, time.UTC),
+	}
+
+	if got := eventPeekTimeLabel(event, now); got != "this evening 6pm" {
+		t.Fatalf("expected event at 18:00 display time to be this evening 6pm, got %q", got)
+	}
+}
+
+func TestEventPeekTimeLabelAddsExactAndFlooredApproximateTime(t *testing.T) {
+	now := time.Date(2026, 5, 4, 9, 0, 0, 0, time.Local)
+	exact := ics.Event{
+		Summary: "Breakfast",
+		Start:   time.Date(2026, 5, 5, 8, 0, 0, 0, time.Local),
+		End:     time.Date(2026, 5, 5, 9, 0, 0, 0, time.Local),
+	}
+	approx := ics.Event{
+		Summary: "Review",
+		Start:   time.Date(2026, 5, 5, 15, 45, 0, 0, time.Local),
+		End:     time.Date(2026, 5, 5, 16, 45, 0, 0, time.Local),
+	}
+
+	if got := eventPeekTimeLabel(exact, now); got != "tomorrow 8am" {
+		t.Fatalf("expected exact hour label, got %q", got)
+	}
+	if got := eventPeekTimeLabel(approx, now); got != "tomorrow ~3pm" {
+		t.Fatalf("expected floored approximate hour label, got %q", got)
+	}
+}
+
+func TestWrapCellsCapsLongTitlesAtTwoLines(t *testing.T) {
+	lines := wrapCells("Alpha Bravo Charlie Delta Echo Foxtrot Golf Hotel India", 18, 2)
+	if len(lines) != 2 {
+		t.Fatalf("expected two wrapped lines, got %d: %+v", len(lines), lines)
+	}
+	for _, line := range lines {
+		if lipgloss.Width(line) > 18 {
+			t.Fatalf("expected line width <= 18, got %d in %q", lipgloss.Width(line), line)
+		}
+	}
+	if !strings.HasSuffix(lines[1], "...") {
+		t.Fatalf("expected truncated final line, got %+v", lines)
+	}
+}
+
 func TestCalendarFetchRemembersMostRecentPastEvent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := config.Default()
