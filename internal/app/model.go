@@ -116,7 +116,7 @@ func New(cfg config.Config, manager config.Manager) Model {
 
 func (m Model) Init() tea.Cmd {
 	m.publishSharingSnapshot()
-	return tea.Batch(tick(), m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd(), m.prideUnlockCmd(), m.sharingControlCmd(m.cfg.Sharing.Enabled))
+	return tea.Batch(m.tickCmd(), m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd(), m.prideUnlockCmd(), m.sharingControlCmd(m.cfg.Sharing.Enabled))
 }
 
 func (m Model) Close() error {
@@ -135,7 +135,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.now = time.Time(msg)
 		m.unlockPrideIfNeeded(m.displayTime())
 		m.rememberPastCalendarEvent(m.displayTime())
-		return m, tick()
+		return m, m.tickCmd()
 	case calendarRefreshMsg:
 		return m, tea.Batch(m.fetchCalendarCmd(), m.scheduleCalendarRefreshCmd())
 	case calendarFetchMsg:
@@ -1915,10 +1915,46 @@ func newCalendarURLInput() textarea.Model {
 	return input
 }
 
-func tick() tea.Cmd {
-	return tea.Tick(125*time.Millisecond, func(t time.Time) tea.Msg {
+func (m Model) tickCmd() tea.Cmd {
+	return tickAfter(nextTickDuration(m.cfg, time.Now()))
+}
+
+func tickAfter(duration time.Duration) tea.Cmd {
+	return tea.Tick(duration, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+func nextTickDuration(cfg config.Config, now time.Time) time.Duration {
+	if secondPrecisionNeeded(cfg) {
+		return durationUntilNextSecond(now)
+	}
+	return durationUntilNextMinute(now)
+}
+
+func secondPrecisionNeeded(cfg config.Config) bool {
+	return cfg.Display.InlineSeconds ||
+		cfg.Display.BlinkSeparator ||
+		cfg.Display.SecondsStyle != "hidden" ||
+		cfg.Workday.ShowProgress ||
+		cfg.Calendar.ShowProgress
+}
+
+func durationUntilNextSecond(now time.Time) time.Duration {
+	return durationUntilNextBoundary(now, time.Second)
+}
+
+func durationUntilNextMinute(now time.Time) time.Duration {
+	return durationUntilNextBoundary(now, time.Minute)
+}
+
+func durationUntilNextBoundary(now time.Time, interval time.Duration) time.Duration {
+	next := now.Truncate(interval).Add(interval)
+	duration := next.Sub(now)
+	if duration <= 0 {
+		return interval
+	}
+	return duration
 }
 
 func horizontalPosition(alignment string) lipgloss.Position {

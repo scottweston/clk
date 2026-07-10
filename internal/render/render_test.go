@@ -325,12 +325,12 @@ func TestWorkdayRendersBeforeDuringAfterAndOffDays(t *testing.T) {
 	opts.Workday.Schedule["fri"] = friday
 
 	opts.Time = time.Date(2026, 5, 1, 18, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "☼ 63:00") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☼ 2d15h") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
 		t.Fatalf("expected after-workday bar to drain toward next start, got %q", got)
 	}
 
 	opts.Time = time.Date(2026, 5, 2, 13, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "☾ 44:00") || strings.Contains(got, "off") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "☾ 1d20h") || strings.Contains(got, "off") || !strings.Contains(got, "=") || !strings.Contains(got, "-") {
 		t.Fatalf("expected off day bar to drain toward next start, got %q", got)
 	}
 }
@@ -349,8 +349,25 @@ func TestWorkdayCanRenderEmojiLabels(t *testing.T) {
 	}
 
 	opts.Time = time.Date(2026, 5, 2, 13, 0, 0, 0, time.Local)
-	if got := SecondsStyled(opts); !strings.Contains(got, "🏖️ 44:00") {
+	if got := SecondsStyled(opts); !strings.Contains(got, "🏖️ 1d20h") {
 		t.Fatalf("expected off-day emoji, got %q", got)
+	}
+}
+
+func TestLongRemainingDurationsUseDaysAndHours(t *testing.T) {
+	cases := []struct {
+		duration time.Duration
+		want     string
+	}{
+		{23*time.Hour + 59*time.Minute + time.Second, "24:00"},
+		{24 * time.Hour, "1d0h"},
+		{92*time.Hour + 20*time.Minute, "3d20h"},
+	}
+
+	for _, tc := range cases {
+		if got := formatHoursMinutesCeil(tc.duration); got != tc.want {
+			t.Fatalf("formatHoursMinutesCeil(%s) = %q, want %q", tc.duration, got, tc.want)
+		}
 	}
 }
 

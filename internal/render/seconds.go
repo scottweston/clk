@@ -322,6 +322,10 @@ func formatHoursMinutesCeil(d time.Duration) string {
 	if d < 0 {
 		d = 0
 	}
+	if d >= 24*time.Hour {
+		hours := int(d / time.Hour)
+		return fmt.Sprintf("%dd%dh", hours/24, hours%24)
+	}
 	minutes := int(math.Ceil(float64(d) / float64(time.Minute)))
 	return fmt.Sprintf("%02d:%02d", minutes/60, minutes%60)
 }

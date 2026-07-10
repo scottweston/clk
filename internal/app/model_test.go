@@ -578,6 +578,47 @@ func TestBlinkSeparatorWorksWithInlineSeconds(t *testing.T) {
 	}
 }
 
+func TestNextTickDurationUsesSecondPrecisionForVisibleSeconds(t *testing.T) {
+	cfg := config.Default()
+	now := time.Date(2026, 5, 1, 13, 14, 15, 250*int(time.Millisecond), time.Local)
+
+	if got := nextTickDuration(cfg, now); got != 750*time.Millisecond {
+		t.Fatalf("expected next tick at next second, got %s", got)
+	}
+}
+
+func TestNextTickDurationUsesMinutePrecisionWhenSecondsAreHidden(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	now := time.Date(2026, 5, 1, 13, 14, 15, 250*int(time.Millisecond), time.Local)
+
+	if got := nextTickDuration(cfg, now); got != 44*time.Second+750*time.Millisecond {
+		t.Fatalf("expected next tick at next minute, got %s", got)
+	}
+}
+
+func TestNextTickDurationUsesSecondPrecisionForBlinkSeparator(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Display.BlinkSeparator = true
+	now := time.Date(2026, 5, 1, 13, 14, 15, 250*int(time.Millisecond), time.Local)
+
+	if got := nextTickDuration(cfg, now); got != 750*time.Millisecond {
+		t.Fatalf("expected blinking separator to tick at next second, got %s", got)
+	}
+}
+
+func TestNextTickDurationUsesSecondPrecisionForProgressRows(t *testing.T) {
+	cfg := config.Default()
+	cfg.Display.SecondsStyle = "hidden"
+	cfg.Workday.ShowProgress = true
+	now := time.Date(2026, 5, 1, 13, 14, 15, 250*int(time.Millisecond), time.Local)
+
+	if got := nextTickDuration(cfg, now); got != 750*time.Millisecond {
+		t.Fatalf("expected progress rows to tick at next second, got %s", got)
+	}
+}
+
 func TestInlineSecondsCanCombineWithProgressDisplay(t *testing.T) {
 	cfg := config.Default()
 	cfg.Display.InlineSeconds = true
