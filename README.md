@@ -1,5 +1,7 @@
 # clk
 
+![Screenshot](assets/screenshot_00.webp)
+
 `clk` is a Bubble Tea terminal clock with large digital renderers, themeable colors,
 animated seconds, optional inline seconds, Bubble Tea progress bars,
 Pomodoro, workday, and ICS calendar progress, blinking separators, double-size rendering,
